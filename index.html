@@ -1,0 +1,2310 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0f18">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <title>Siege Rounds</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=MedievalSharp&display=swap');
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #06090e;
+      font-family: 'Cinzel', 'MedievalSharp', Georgia, 'Times New Roman', serif;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at 50% 30%, #151f2e 0%, #080d14 70%, #030508 100%);
+    }
+    #game-container {
+      position: relative;
+      width: min(100vw, calc(100vh * (720 / 1280)));
+      height: min(100vh, calc(100vw * (1280 / 720)));
+      box-shadow: 0 12px 50px rgba(0,0,0,0.9), 0 0 25px rgba(212, 175, 55, 0.25);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #0a0f18;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+    }
+  </style>
+</head>
+<body>
+
+<div id="game-container">
+  <canvas id="c" width="720" height="1280"></canvas>
+</div>
+
+<script>
+(()=>{
+'use strict';
+
+// -------------------------------------------------------------
+// PERSISTENT DATA (100% Offline LocalStorage)
+// -------------------------------------------------------------
+let bestScore = +(localStorage.getItem('sr_best_score') || 0);
+let soundOn = localStorage.getItem('sr_sound') !== '0';
+
+// -------------------------------------------------------------
+// CANVAS SCALING & DPI SETUP
+// -------------------------------------------------------------
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = 720, H = 1280;
+
+function setupCanvasScale() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  ctx.scale(dpr, dpr);
+}
+setupCanvasScale();
+window.addEventListener('resize', setupCanvasScale);
+
+// -------------------------------------------------------------
+// PROCEDURAL AUDIO SYNTHESIS ENGINE (100% Offline WebAudio)
+// -------------------------------------------------------------
+let actx = null;
+function getAudio() {
+  if (!actx) {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (AudioContext) actx = new AudioContext();
+  }
+  if (actx && actx.state === 'suspended') actx.resume();
+  return actx;
+}
+
+function playTone(freq, type='sine', duration=0.15, vol=0.1, slideTo=null) {
+  if (!soundOn) return;
+  const ac = getAudio();
+  if (!ac) return;
+  try {
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, ac.currentTime);
+    if (slideTo) {
+      osc.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), ac.currentTime + duration);
+    }
+    gain.gain.setValueAtTime(vol, ac.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(ac.destination);
+    osc.start();
+    osc.stop(ac.currentTime + duration);
+  } catch(e) {}
+}
+
+function playChord(freqs, type='triangle', duration=0.4, vol=0.08) {
+  if (!soundOn) return;
+  freqs.forEach((f, i) => {
+    setTimeout(() => playTone(f, type, duration, vol), i * 45);
+  });
+}
+
+function playBoom() {
+  if (!soundOn) return;
+  const ac = getAudio();
+  if (!ac) return;
+  try {
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(90, ac.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(20, ac.currentTime + 0.45);
+    gain.gain.setValueAtTime(0.22, ac.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.45);
+    osc.connect(gain);
+    gain.connect(ac.destination);
+    osc.start();
+    osc.stop(ac.currentTime + 0.45);
+  } catch(e) {}
+}
+
+function vibrate(ms=25) {
+  if (navigator.vibrate) {
+    try { navigator.vibrate(ms); } catch(e) {}
+  }
+}
+
+// Tension March Drum Beat
+let bgmTimer = 0;
+let bgmBeat = 0;
+function updateBGM(dt) {
+  if (!soundOn || gameState !== 'play') return;
+  bgmTimer += dt;
+  if (bgmTimer >= 0.42) {
+    bgmTimer -= 0.42;
+    bgmBeat = (bgmBeat + 1) % 8;
+    if (bgmBeat === 0 || bgmBeat === 4) {
+      playTone(52, 'triangle', 0.25, 0.05, 28);
+    } else if (bgmBeat === 2 || bgmBeat === 6) {
+      playTone(160, 'sine', 0.08, 0.02, 80);
+    }
+  }
+}
+
+// -------------------------------------------------------------
+// GAME CONSTANTS & ARCHETYPES
+// -------------------------------------------------------------
+const TRIAGE = {
+  CRITICAL: { key: 'critical', name: 'CRITICAL', color: '#ff334b', dark: '#5e0b16', bedIdx: 0, life: 12, pts: 180, healTime: 1.8, wallHeal: 15, damage: 22, icon: '💀' },
+  URGENT:   { key: 'urgent',   name: 'URGENT',   color: '#ffb300', dark: '#523800', bedIdx: 1, life: 16, pts: 120, healTime: 1.5, wallHeal: 11, damage: 15, icon: '⚡' },
+  MINOR:    { key: 'minor',    name: 'MINOR',    color: '#00e676', dark: '#004722', bedIdx: 2, life: 20, pts: 80,  healTime: 1.2, wallHeal: 8,  damage: 9,  icon: '🛡️' }
+};
+
+const ARCHETYPES = {
+  STANDARD: { id: 'standard', name: 'Knight' },
+  PRINCE:   { id: 'prince',   name: 'Royal Prince', bonus: '👑 +350 PTS & +25% WALL!', crown: true },
+  ARCHER:   { id: 'archer',   name: 'Longbow Archer', bonus: '🏹 DEFENDS BATTLEMENTS!', bow: true },
+  PLAGUE:   { id: 'plague',   name: 'Cursed Knight', bonus: '☣️ PURIFY QUICKLY!', cursed: true },
+  VANGUARD: { id: 'vanguard', name: 'Iron Vanguard', bonus: '🛡️ HEAVY FORTIFICATION', heavy: true }
+};
+
+const WAVES = [
+  { wave: 1, name: 'The Skirmish',       knights: 6,  rate: 3.2, catapults: false, weather: 'clear' },
+  { wave: 2, name: 'Catapult Barrage',   knights: 8,  rate: 2.7, catapults: true,  weather: 'smoke' },
+  { wave: 3, name: 'Storming the Keep',  knights: 11, rate: 2.3, catapults: true,  weather: 'storm' },
+  { wave: 4, name: 'Gatehouse Breach',   knights: 13, rate: 1.9, catapults: true,  weather: 'fire' },
+  { wave: 5, name: 'The Final Assault',  knights: 16, rate: 1.5, catapults: true,  weather: 'siege' }
+];
+
+let gameState = 'home'; // 'home', 'howtoplay', 'play', 'pause', 'reward', 'victory', 'gameover'
+let gameMode = 'solo';  // 'solo', 'vs' (1v1 Attacker vs Defender)
+let currentWave = 1;
+let wallHP = 100;
+let maxWallHP = 100;
+let score = 0;
+let combo = 0;
+let maxCombo = 0;
+let knightsSaved = 0;
+let knightsLost = 0;
+let waveSpawned = 0;
+let spawnTimer = 0.5;
+let globalTime = 0;
+let screenShake = 0;
+let tutorialStep = 1;
+let selectedQueueKnight = null; // Tap-to-select support
+
+// 1v1 Versus Mode State
+let vsTimeLeft = 75; // 75 second duel
+let vsWinner = null; // 'attacker' or 'defender'
+let attackerSkills = {
+  catapult: { name: 'Catapult', icon: '🪨', cooldown: 3.5, timer: 0, dmg: 8 },
+  arrowVolley: { name: 'Fire Arrows', icon: '🏹', cooldown: 6.0, timer: 0, dmg: 10 },
+  ladderRush: { name: 'Ladders', icon: '🪜', cooldown: 9.0, timer: 0, dmg: 14 },
+  plagueBomb: { name: 'Plague Bomb', icon: '☣️', cooldown: 12.0, timer: 0 }
+};
+
+// Weather & Atmosphere
+let lightningFlash = 0;
+let stormRain = [];
+let siegeEmbers = [];
+let wallDefenders = [];
+let archerArrows = [];
+let catapultRocks = [];
+
+// Defender Emergency Skills
+let skills = {
+  elixir: { name: 'Miracle Elixir', icon: '🧪', cooldown: 25, timer: 0 },
+  shield: { name: 'Gate Barricade', icon: '🛡️', cooldown: 35, timer: 0, activeTime: 0 }
+};
+
+// Relics Forge
+let playerRelics = [];
+let perks = {
+  healMult: 1.0,
+  lifeMult: 1.0,
+  wallArmor: 0,
+  autoHeal: 0,
+  comboBonus: 1.0
+};
+
+const ALL_RELICS = [
+  { id: 'salve',    name: 'ROYAL FIELD SALVE', desc: '+45% Faster Bandage & Healing Speed', icon: '🍯', apply: p => p.healMult += 0.45 },
+  { id: 'bastion',  name: 'GRANITE BASTION',   desc: '+25 Wall Max HP & +12 HP Repair per Wave', icon: '🧱', apply: (p, g) => { g.maxWallHP += 25; g.wallHP = Math.min(g.maxWallHP, g.wallHP + 25); p.wallArmor += 12; } },
+  { id: 'tincture', name: 'HERBAL TINCTURE',   desc: '+35% Patient Bleedout Survival Timers', icon: '🌿', apply: p => p.lifeMult += 0.35 },
+  { id: 'order',    name: 'APOTHECARY ORDER',  desc: 'Infirmary beds slowly auto-treat patients', icon: '✨', apply: p => p.autoHeal += 0.4 },
+  { id: 'horn',     name: 'WARHORN OF VALOR',  desc: 'Combos grant +50% extra wall repair & points', icon: '🎺', apply: p => p.comboBonus += 0.5 }
+];
+let rewardOptions = [];
+
+// Entities
+let queueKnights = [];
+let beds = [
+  { idx: 0, type: TRIAGE.CRITICAL, x: 130, y: 730, w: 170, h: 220, patient: null, treatProgress: 0, isHealing: false },
+  { idx: 1, type: TRIAGE.URGENT,   x: 360, y: 730, w: 170, h: 220, patient: null, treatProgress: 0, isHealing: false },
+  { idx: 2, type: TRIAGE.MINOR,    x: 590, y: 730, w: 170, h: 220, patient: null, treatProgress: 0, isHealing: false }
+];
+let activeTouches = new Map();
+let particles = [];
+let floatingTexts = [];
+
+// Ambient particles setup
+for (let i = 0; i < 45; i++) {
+  siegeEmbers.push({
+    x: Math.random() * W,
+    y: Math.random() * H,
+    vy: -(15 + Math.random() * 35),
+    vx: (Math.random() - 0.5) * 15,
+    size: 1 + Math.random() * 2.5,
+    alpha: 0.2 + Math.random() * 0.7
+  });
+}
+for (let i = 0; i < 60; i++) {
+  stormRain.push({
+    x: Math.random() * W,
+    y: Math.random() * H,
+    speed: 550 + Math.random() * 300,
+    len: 12 + Math.random() * 10
+  });
+}
+
+// -------------------------------------------------------------
+// GAME STATE MANAGEMENT
+// -------------------------------------------------------------
+function startGame(mode) {
+  gameMode = mode;
+  gameState = 'play';
+  currentWave = 1;
+  maxWallHP = 100;
+  wallHP = 100;
+  score = 0;
+  combo = 0;
+  maxCombo = 0;
+  knightsSaved = 0;
+  knightsLost = 0;
+  waveSpawned = 0;
+  spawnTimer = 0.6;
+  screenShake = 0;
+  selectedQueueKnight = null;
+  playerRelics = [];
+  perks = {
+    healMult: 1.0,
+    lifeMult: 1.0,
+    wallArmor: 0,
+    autoHeal: 0,
+    comboBonus: 1.0
+  };
+  skills.elixir.timer = 0;
+  skills.shield.timer = 0;
+  skills.shield.activeTime = 0;
+
+  // 1v1 specific setup
+  if (gameMode === 'vs') {
+    vsTimeLeft = 75;
+    vsWinner = null;
+    attackerSkills.catapult.timer = 0;
+    attackerSkills.arrowVolley.timer = 2;
+    attackerSkills.ladderRush.timer = 4;
+    attackerSkills.plagueBomb.timer = 6;
+  }
+
+  queueKnights = [];
+  beds.forEach(b => { b.patient = null; b.treatProgress = 0; b.isHealing = false; });
+  activeTouches.clear();
+  particles = [];
+  floatingTexts = [];
+  catapultRocks = [];
+  wallDefenders = [];
+  archerArrows = [];
+  tutorialStep = (bestScore === 0 && gameMode === 'solo') ? 1 : 0;
+
+  addFloatingText(360, 520, gameMode === 'vs' ? '⚔️ 1v1 SIEGE DUEL BEGINS!' : '⚔️ WAVE 1: DEFEND THE KEEP!', '#ffd875', 30);
+  playTone(520, 'triangle', 0.25, 0.15, 780);
+}
+
+function restartCurrentWave() {
+  gameState = 'play';
+  wallHP = Math.min(maxWallHP, wallHP + 20);
+  waveSpawned = 0;
+  spawnTimer = 0.8;
+  selectedQueueKnight = null;
+  queueKnights = [];
+  beds.forEach(b => { b.patient = null; b.treatProgress = 0; b.isHealing = false; });
+  catapultRocks = [];
+  archerArrows = [];
+  addFloatingText(360, 520, `⚔️ WAVE ${currentWave} RESTARTED!`, '#ffd875', 28);
+  playTone(440, 'triangle', 0.2, 0.1);
+}
+
+function spawnKnight(forceCursed=false) {
+  const waveData = WAVES[currentWave - 1] || WAVES[0];
+  if (gameMode === 'solo' && waveSpawned >= waveData.knights) return;
+
+  // Balanced Triage Distribution (Equal chances for Critical, Urgent, Minor)
+  let r = Math.random();
+  let triageType = (r < 0.35) ? TRIAGE.MINOR : (r < 0.68) ? TRIAGE.URGENT : TRIAGE.CRITICAL;
+
+  let arch = ARCHETYPES.STANDARD;
+  if (forceCursed) {
+    arch = ARCHETYPES.PLAGUE;
+  } else {
+    const archRoll = Math.random();
+    if (archRoll < 0.12 && currentWave >= 2) {
+      arch = ARCHETYPES.PRINCE;
+    } else if (archRoll < 0.28 && currentWave >= 2) {
+      arch = ARCHETYPES.ARCHER;
+    } else if (archRoll < 0.42 && currentWave >= 3) {
+      arch = ARCHETYPES.PLAGUE;
+    } else if (archRoll < 0.55 && currentWave >= 3) {
+      arch = ARCHETYPES.VANGUARD;
+    }
+  }
+
+  const baseLife = triageType.life * perks.lifeMult * (arch.heavy ? 1.3 : arch.cursed ? 0.75 : 1.0);
+  const knight = {
+    id: Math.random().toString(36).substring(2, 9),
+    type: triageType,
+    arch,
+    life: baseLife,
+    maxLife: baseLife,
+    x: 130 + (queueKnights.length % 4) * 155,
+    y: 1040 + Math.floor(queueKnights.length / 4) * 110,
+    targetX: 130 + (queueKnights.length % 4) * 155,
+    targetY: 1040 + Math.floor(queueKnights.length / 4) * 110,
+    dragged: false,
+    inBed: null,
+    isPurified: !arch.cursed,
+    wounds: Math.floor(Math.random() * 3) + 1,
+    bobOffset: Math.random() * Math.PI * 2
+  };
+
+  queueKnights.push(knight);
+  waveSpawned++;
+  playTone(320, 'sine', 0.1, 0.06, 380);
+
+  if (arch === ARCHETYPES.PRINCE) {
+    addFloatingText(360, 920, '👑 THE ROYAL PRINCE HAS ARRIVED!', '#ffd875', 24);
+    playChord([587, 740, 880], 'triangle', 0.3, 0.15);
+  } else if (arch === ARCHETYPES.PLAGUE) {
+    addFloatingText(360, 920, '☣️ CURSED KNIGHT! PURIFY RAPIDLY!', '#b388ff', 22);
+  }
+}
+
+function handleKnightDeath(knight, bed=null) {
+  knightsLost++;
+  combo = 0;
+  let dmg = knight.type.damage;
+  if (knight.arch === ARCHETYPES.PRINCE) dmg = 30;
+
+  if (skills.shield.activeTime <= 0) {
+    wallHP = Math.max(0, wallHP - dmg);
+  }
+  screenShake = 18;
+  vibrate(70);
+  playBoom();
+
+  const posX = bed ? bed.x : knight.x;
+  const posY = bed ? bed.y : knight.y;
+  createParticles(posX, posY, '#ff334b', 25);
+  addFloatingText(posX, posY - 30, `-${dmg}% WALL BREACH!`, '#ff334b', 26);
+
+  if (selectedQueueKnight === knight) selectedQueueKnight = null;
+
+  if (bed) {
+    bed.patient = null;
+    bed.treatProgress = 0;
+    bed.isHealing = false;
+  } else {
+    queueKnights = queueKnights.filter(k => k !== knight);
+  }
+
+  if (wallHP <= 0) {
+    if (gameMode === 'vs') {
+      vsWinner = 'attacker';
+      triggerVictory();
+    } else {
+      triggerGameOver();
+    }
+  }
+}
+
+function treatKnightSuccess(bed) {
+  const patient = bed.patient;
+  if (!patient) return;
+
+  combo++;
+  if (combo > maxCombo) maxCombo = combo;
+  knightsSaved++;
+  vibrate(30);
+
+  const comboMult = 1 + Math.min(combo, 10) * 0.12 * perks.comboBonus;
+  let earnedPts = Math.floor(patient.type.pts * comboMult);
+  let healAmount = Math.floor(patient.type.wallHeal * (1 + (combo > 3 ? 0.3 : 0)));
+
+  if (patient.arch === ARCHETYPES.PRINCE) {
+    earnedPts += 350;
+    healAmount += 25;
+    skills.shield.activeTime = 5.0;
+    addFloatingText(360, 480, '👑 ROYAL SALVATION! SHIELD ACTIVATED!', '#ffd875', 28);
+  } else if (patient.arch === ARCHETYPES.VANGUARD) {
+    healAmount += 12;
+    addFloatingText(bed.x, bed.y - 80, '🛡️ VANGUARD FORTIFIES WALL!', '#00e676', 22);
+  }
+
+  score += earnedPts;
+  wallHP = Math.min(maxWallHP, wallHP + healAmount);
+
+  playChord([523, 659, 784, 1046], 'triangle', 0.35, 0.12);
+  createParticles(bed.x, bed.y - 20, '#00e676', 25);
+  createParticles(bed.x, bed.y - 20, '#ffd875', 15);
+  addFloatingText(bed.x, bed.y - 50, `+${earnedPts} DEFENDER!`, '#ffd875', 26);
+  addFloatingText(bed.x, bed.y - 80, `+${healAmount}% WALL REPAIRED`, '#00e676', 20);
+
+  if (combo >= 3) {
+    addFloatingText(360, 440, `🔥 COMBO x${combo}!`, '#ff9100', 32);
+  }
+
+  wallDefenders.push({
+    x: 80 + Math.random() * 560,
+    y: 285 + Math.random() * 20,
+    type: patient.type,
+    arch: patient.arch,
+    cheerTimer: patient.arch === ARCHETYPES.ARCHER ? 20.0 : 6.0,
+    shootTimer: 0.8
+  });
+
+  bed.patient = null;
+  bed.treatProgress = 0;
+  bed.isHealing = false;
+
+  if (tutorialStep === 2) tutorialStep = 0;
+}
+
+// Defender Emergency Skills
+function activateElixir() {
+  if (skills.elixir.timer > 0) return;
+  skills.elixir.timer = skills.elixir.cooldown;
+  vibrate(50);
+  playChord([659, 880, 1174], 'sine', 0.4, 0.15);
+
+  beds.forEach(b => {
+    if (b.patient) {
+      b.treatProgress += b.patient.type.healTime * 0.55;
+      b.patient.isPurified = true;
+      createParticles(b.x, b.y, '#b388ff', 20);
+    }
+  });
+  wallHP = Math.min(maxWallHP, wallHP + 12);
+  addFloatingText(360, 680, '🧪 MIRACLE ELIXIR APPLIED!', '#69f0ae', 28);
+}
+
+function activateShield() {
+  if (skills.shield.timer > 0) return;
+  skills.shield.timer = skills.shield.cooldown;
+  skills.shield.activeTime = 6.0;
+  vibrate(50);
+  playTone(220, 'triangle', 0.5, 0.2, 440);
+  addFloatingText(360, 260, '🛡️ GATE BARRICADED! IMMUNITY ACTIVE!', '#ffd875', 28);
+}
+
+// Attacker 1v1 Skills
+function triggerAttackerSkill(key) {
+  const sk = attackerSkills[key];
+  if (!sk || sk.timer > 0) return;
+  sk.timer = sk.cooldown;
+  vibrate(40);
+
+  if (key === 'catapult') {
+    spawnCatapultRock();
+    playTone(180, 'sawtooth', 0.3, 0.15, 60);
+    addFloatingText(180, 120, '🪨 CATAPULT FIRED!', '#ff9800', 22);
+  } else if (key === 'arrowVolley') {
+    for (let i = 0; i < 4; i++) {
+      setTimeout(() => spawnCatapultRock(), i * 180);
+    }
+    playTone(340, 'triangle', 0.2, 0.1);
+    addFloatingText(360, 120, '🏹 FLAMING VOLLEY!', '#ff5722', 22);
+  } else if (key === 'ladderRush') {
+    screenShake = 16;
+    playBoom();
+    if (skills.shield.activeTime <= 0) {
+      wallHP = Math.max(0, wallHP - sk.dmg);
+      addFloatingText(360, 260, '-14% LADDER BREACH!', '#ff1744', 24);
+      if (wallHP <= 0) {
+        vsWinner = 'attacker';
+        triggerVictory();
+      }
+    } else {
+      addFloatingText(360, 260, '🛡️ LADDER REPELLED!', '#ffd875', 24);
+    }
+  } else if (key === 'plagueBomb') {
+    spawnKnight(true);
+    addFloatingText(540, 120, '☣️ PLAGUE BOMB FLUNG!', '#b388ff', 22);
+    playTone(480, 'sawtooth', 0.3, 0.12, 180);
+  }
+}
+
+function triggerWaveReward() {
+  if (currentWave === 5) {
+    triggerVictory();
+    return;
+  }
+  gameState = 'reward';
+  rewardOptions = [...ALL_RELICS].sort(() => Math.random() - 0.5).slice(0, 3);
+  playChord([440, 554, 659, 880], 'sine', 0.5, 0.12);
+}
+
+function selectRelic(index) {
+  const chosen = rewardOptions[index];
+  if (!chosen) return;
+
+  playerRelics.push(chosen);
+  chosen.apply(perks, { maxWallHP, wallHP });
+  wallHP = Math.min(maxWallHP, wallHP + 15 + perks.wallArmor);
+
+  currentWave++;
+  waveSpawned = 0;
+  spawnTimer = 1.0;
+  gameState = 'play';
+
+  addFloatingText(360, 520, `🛡️ WAVE ${currentWave} COMMENCES!`, '#ffd875', 30);
+  playChord([587, 740, 880, 1174], 'triangle', 0.4, 0.15);
+}
+
+function triggerVictory() {
+  gameState = 'victory';
+  if (score > bestScore) {
+    bestScore = score;
+    localStorage.setItem('sr_best_score', bestScore);
+  }
+  vibrate([100, 50, 100, 50, 200]);
+  playChord([523, 659, 784, 1046, 1318], 'triangle', 0.8, 0.2);
+}
+
+function triggerGameOver() {
+  gameState = 'gameover';
+  if (score > bestScore) {
+    bestScore = score;
+    localStorage.setItem('sr_best_score', bestScore);
+  }
+  vibrate(120);
+  playTone(130, 'sawtooth', 0.8, 0.25, 45);
+}
+
+// -------------------------------------------------------------
+// PARTICLES & COMBAT TEXTS
+// -------------------------------------------------------------
+function createParticles(x, y, color, count=15) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 40 + Math.random() * 160;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 20,
+      size: 3 + Math.random() * 5,
+      color,
+      alpha: 1.0,
+      decay: 1.2 + Math.random() * 1.5
+    });
+  }
+}
+
+function addFloatingText(x, y, text, color='#ffffff', size=22) {
+  floatingTexts.push({
+    x, y,
+    vy: -45,
+    text,
+    color,
+    size,
+    alpha: 1.0,
+    life: 1.2
+  });
+}
+
+function spawnCatapultRock() {
+  const startX = Math.random() > 0.5 ? -40 : W + 40;
+  const startY = 80 + Math.random() * 100;
+  const targetX = 120 + Math.random() * 480;
+  const targetY = 270 + Math.random() * 60;
+  catapultRocks.push({
+    x: startX, y: startY,
+    startX, startY,
+    targetX, targetY,
+    t: 0,
+    speed: 0.6 + Math.random() * 0.35,
+    size: 16 + Math.random() * 8
+  });
+}
+
+// -------------------------------------------------------------
+// UPDATE LOOP
+// -------------------------------------------------------------
+function update(dt) {
+  globalTime += dt;
+
+  if (screenShake > 0) {
+    screenShake = Math.max(0, screenShake - dt * 45);
+  }
+
+  for (let e of siegeEmbers) {
+    e.y += e.vy * dt;
+    e.x += e.vx * dt;
+    if (e.y < -10) {
+      e.y = H + 10;
+      e.x = Math.random() * W;
+    }
+  }
+
+  if (gameState !== 'play') return;
+
+  updateBGM(dt);
+
+  // 1v1 Versus timer & cooldowns
+  if (gameMode === 'vs') {
+    vsTimeLeft -= dt;
+    if (vsTimeLeft <= 0) {
+      vsWinner = 'defender'; // Defender survived!
+      triggerVictory();
+      return;
+    }
+    for (let k in attackerSkills) {
+      if (attackerSkills[k].timer > 0) attackerSkills[k].timer = Math.max(0, attackerSkills[k].timer - dt);
+    }
+  }
+
+  // Defender Skills cooldown
+  if (skills.elixir.timer > 0) skills.elixir.timer = Math.max(0, skills.elixir.timer - dt);
+  if (skills.shield.timer > 0) skills.shield.timer = Math.max(0, skills.shield.timer - dt);
+  if (skills.shield.activeTime > 0) skills.shield.activeTime = Math.max(0, skills.shield.activeTime - dt);
+
+  const waveData = WAVES[currentWave - 1] || WAVES[0];
+  if (waveData.weather === 'storm') {
+    for (let r of stormRain) {
+      r.y += r.speed * dt;
+      r.x -= 70 * dt;
+      if (r.y > H) {
+        r.y = -20;
+        r.x = Math.random() * W;
+      }
+    }
+    if (Math.random() < dt * 0.35) {
+      lightningFlash = 0.35;
+      playTone(70, 'sawtooth', 0.4, 0.12, 30);
+    }
+  }
+  if (lightningFlash > 0) {
+    lightningFlash = Math.max(0, lightningFlash - dt * 1.5);
+  }
+
+  // Spawning logic
+  spawnTimer -= dt;
+  if (spawnTimer <= 0) {
+    if (gameMode === 'vs') {
+      if (queueKnights.length < 5) spawnKnight();
+      spawnTimer = 2.4;
+    } else if (waveSpawned < waveData.knights) {
+      spawnKnight();
+      spawnTimer = waveData.rate;
+    }
+  }
+
+  // AI Catapult attacks in Solo mode
+  if (gameMode === 'solo' && waveData.catapults && Math.random() < dt * 0.45) {
+    spawnCatapultRock();
+  }
+
+  // Update Catapult Rocks
+  for (let i = catapultRocks.length - 1; i >= 0; i--) {
+    const rock = catapultRocks[i];
+    rock.t += dt * rock.speed;
+    const arc = Math.sin(rock.t * Math.PI) * 140;
+    rock.x = rock.startX + (rock.targetX - rock.startX) * rock.t;
+    rock.y = (rock.startY + (rock.targetY - rock.startY) * rock.t) - arc;
+
+    if (Math.random() < 0.6) {
+      particles.push({
+        x: rock.x, y: rock.y,
+        vx: (Math.random() - 0.5) * 20, vy: (Math.random() - 0.5) * 20,
+        size: 4 + Math.random() * 4,
+        color: '#ff6d00',
+        alpha: 0.7, decay: 2.0
+      });
+    }
+
+    // Collide with archer arrows
+    for (let j = archerArrows.length - 1; j >= 0; j--) {
+      const arr = archerArrows[j];
+      if (Math.hypot(arr.x - rock.x, arr.y - rock.y) < 35) {
+        createParticles(rock.x, rock.y, '#ffd875', 20);
+        addFloatingText(rock.x, rock.y - 20, '🏹 SHOT DOWN!', '#69f0ae', 22);
+        playTone(600, 'triangle', 0.15, 0.1);
+        catapultRocks.splice(i, 1);
+        archerArrows.splice(j, 1);
+        break;
+      }
+    }
+    if (!catapultRocks[i]) continue;
+
+    if (rock.t >= 1.0) {
+      screenShake = Math.max(screenShake, 14);
+      playBoom();
+      createParticles(rock.targetX, rock.targetY, '#ff7043', 20);
+      createParticles(rock.targetX, rock.targetY, '#90a4ae', 15);
+
+      if (skills.shield.activeTime > 0) {
+        addFloatingText(rock.targetX, rock.targetY - 20, '🛡️ BLOCKED BY BARRICADE!', '#ffd875', 22);
+        playTone(300, 'triangle', 0.2, 0.1);
+      } else {
+        wallHP = Math.max(0, wallHP - 7);
+        addFloatingText(rock.targetX, rock.targetY - 20, '-7% CATAPULT HIT!', '#ff5252', 20);
+        if (wallHP <= 0) {
+          if (gameMode === 'vs') {
+            vsWinner = 'attacker';
+            triggerVictory();
+          } else {
+            triggerGameOver();
+          }
+        }
+      }
+      catapultRocks.splice(i, 1);
+    }
+  }
+
+  // Archers on battlements
+  for (let d of wallDefenders) {
+    if (d.arch === ARCHETYPES.ARCHER && catapultRocks.length > 0) {
+      d.shootTimer -= dt;
+      if (d.shootTimer <= 0) {
+        d.shootTimer = 1.2;
+        const target = catapultRocks[0];
+        archerArrows.push({
+          x: d.x, y: d.y,
+          tx: target.x, ty: target.y,
+          t: 0
+        });
+        playTone(700, 'sine', 0.08, 0.05, 900);
+      }
+    }
+  }
+
+  for (let i = archerArrows.length - 1; i >= 0; i--) {
+    const arr = archerArrows[i];
+    arr.t += dt * 3.5;
+    arr.x += (arr.tx - arr.x) * (dt * 5);
+    arr.y += (arr.ty - arr.y) * (dt * 5);
+    if (arr.t >= 1.0) archerArrows.splice(i, 1);
+  }
+
+  // Queue Knights Positioning & Decay
+  const activeQueue = queueKnights.filter(k => !k.dragged && !k.inBed);
+  activeQueue.forEach((k, idx) => {
+    k.targetX = 130 + (idx % 4) * 155;
+    k.targetY = 1040 + Math.floor(idx / 4) * 110;
+    k.x += (k.targetX - k.x) * Math.min(1, dt * 12);
+    k.y += (k.targetY - k.y) * Math.min(1, dt * 12);
+
+    k.life -= dt;
+    if (k.life <= 0) {
+      handleKnightDeath(k, null);
+    }
+  });
+
+  // Bed Treatment Update
+  beds.forEach(bed => {
+    if (!bed.patient) return;
+    const p = bed.patient;
+
+    p.life -= dt * (bed.isHealing ? 0.3 : 1.0);
+    if (p.life <= 0) {
+      handleKnightDeath(p, bed);
+      return;
+    }
+
+    if (perks.autoHeal > 0 && p.isPurified) {
+      bed.treatProgress += dt * perks.autoHeal * perks.healMult;
+      if (Math.random() < 0.25) {
+        particles.push({
+          x: bed.x + (Math.random() - 0.5) * 60,
+          y: bed.y + (Math.random() - 0.5) * 40,
+          vx: 0, vy: -30, size: 3, color: '#00e676', alpha: 0.8, decay: 1.5
+        });
+      }
+    }
+
+    if (bed.isHealing) {
+      if (!p.isPurified) {
+        p.isPurified = true;
+        createParticles(bed.x, bed.y, '#b388ff', 15);
+        addFloatingText(bed.x, bed.y - 40, '✨ PURIFIED!', '#b388ff', 20);
+        playTone(700, 'triangle', 0.15, 0.1);
+      } else {
+        bed.treatProgress += dt * 1.65 * perks.healMult;
+        if (Math.random() < 0.4) {
+          particles.push({
+            x: bed.x + (Math.random() - 0.5) * 70,
+            y: bed.y + (Math.random() - 0.5) * 50,
+            vx: (Math.random() - 0.5) * 30, vy: -(20 + Math.random() * 40),
+            size: 4, color: '#ffd54f', alpha: 0.9, decay: 2.0
+          });
+        }
+      }
+    }
+
+    if (bed.treatProgress >= p.type.healTime) {
+      treatKnightSuccess(bed);
+    }
+  });
+
+  for (let i = wallDefenders.length - 1; i >= 0; i--) {
+    const d = wallDefenders[i];
+    d.cheerTimer -= dt;
+    if (d.cheerTimer <= 0) wallDefenders.splice(i, 1);
+  }
+
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const pt = particles[i];
+    pt.x += pt.vx * dt;
+    pt.y += pt.vy * dt;
+    pt.alpha -= pt.decay * dt;
+    if (pt.alpha <= 0) particles.splice(i, 1);
+  }
+
+  for (let i = floatingTexts.length - 1; i >= 0; i--) {
+    const ft = floatingTexts[i];
+    ft.y += ft.vy * dt;
+    ft.life -= dt;
+    ft.alpha = Math.max(0, ft.life / 1.2);
+    if (ft.life <= 0) floatingTexts.splice(i, 1);
+  }
+
+  // Solo mode wave clear check
+  if (gameMode === 'solo') {
+    const anyLeft = queueKnights.length > 0 || beds.some(b => b.patient !== null);
+    if (waveSpawned >= waveData.knights && !anyLeft) {
+      triggerWaveReward();
+    }
+  }
+}
+
+// -------------------------------------------------------------
+// RENDERING SYSTEM
+// -------------------------------------------------------------
+function draw() {
+  ctx.save();
+
+  if (screenShake > 0) {
+    ctx.translate((Math.random() - 0.5) * screenShake, (Math.random() - 0.5) * screenShake);
+  }
+
+  // 1. SKY & DISTANT FORTRESS
+  const waveData = WAVES[currentWave - 1] || WAVES[0];
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, 420);
+  if (waveData.weather === 'storm') {
+    skyGrad.addColorStop(0, '#04070d');
+    skyGrad.addColorStop(0.6, '#0f1826');
+    skyGrad.addColorStop(1, '#1a273b');
+  } else if (waveData.weather === 'fire' || waveData.weather === 'siege' || gameMode === 'vs') {
+    skyGrad.addColorStop(0, '#08080f');
+    skyGrad.addColorStop(0.6, '#281116');
+    skyGrad.addColorStop(1, '#421614');
+  } else {
+    skyGrad.addColorStop(0, '#060a12');
+    skyGrad.addColorStop(0.5, '#101a28');
+    skyGrad.addColorStop(1, '#2a1a1f');
+  }
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, 450);
+
+  // Crescent Moon
+  ctx.fillStyle = '#ffecb3';
+  ctx.beginPath();
+  ctx.arc(620, 80, 26, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = skyGrad;
+  ctx.beginPath();
+  ctx.arc(631, 75, 24, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Mountain Silhouette
+  ctx.fillStyle = '#121620';
+  ctx.beginPath();
+  ctx.moveTo(0, 360);
+  ctx.lineTo(90, 310);
+  ctx.lineTo(210, 350);
+  ctx.lineTo(340, 280);
+  ctx.lineTo(460, 335);
+  ctx.lineTo(600, 295);
+  ctx.lineTo(720, 350);
+  ctx.lineTo(720, 420);
+  ctx.lineTo(0, 420);
+  ctx.fill();
+
+  // Lightning
+  if (lightningFlash > 0) {
+    ctx.fillStyle = `rgba(255, 255, 255, ${lightningFlash})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // Rain
+  if (waveData.weather === 'storm') {
+    ctx.strokeStyle = 'rgba(174, 213, 249, 0.35)';
+    ctx.lineWidth = 1.5;
+    for (let r of stormRain) {
+      ctx.beginPath();
+      ctx.moveTo(r.x, r.y);
+      ctx.lineTo(r.x - 6, r.y + r.len);
+      ctx.stroke();
+    }
+  }
+
+  // 2. CASTLE WALL BATTLEMENTS
+  drawCastleWall();
+
+  // 3. INFIRMARY INTERIOR
+  drawInfirmaryInterior();
+
+  // 4. TRIAGE BEDS
+  beds.forEach(bed => drawBed(bed));
+
+  // 5. QUEUE AREA
+  drawQueueArea();
+
+  // 6. 1v1 ATTACKER CONTROL BAR (If 1v1 Mode)
+  if (gameMode === 'vs') {
+    drawAttackerCommandBar();
+  }
+
+  // 7. PROJECTILES
+  drawCatapultsAndProjectiles();
+
+  // 8. DRAGGED KNIGHT
+  activeTouches.forEach(touch => {
+    if (touch.dragKnight) {
+      const grad = ctx.createRadialGradient(touch.x, touch.y, 10, touch.x, touch.y, 65);
+      grad.addColorStop(0, touch.dragKnight.type.color + 'aa');
+      grad.addColorStop(1, 'transparent');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(touch.x, touch.y, 65, 0, Math.PI * 2);
+      ctx.fill();
+
+      drawKnightSprite(touch.x, touch.y, touch.dragKnight, 1.15, true);
+    }
+  });
+
+  // 9. PARTICLES & TEXTS
+  drawParticlesAndTexts();
+
+  // 10. SIEGE EMBERS
+  for (let e of siegeEmbers) {
+    ctx.fillStyle = '#ff9800';
+    ctx.globalAlpha = e.alpha;
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, e.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1.0;
+
+  // 11. TOP HUD
+  drawHUD();
+
+  // 12. TUTORIAL HINTS
+  if (tutorialStep > 0 && gameState === 'play') {
+    drawTutorialHint();
+  }
+
+  // 13. SCREEN OVERLAYS
+  if (gameState === 'home') {
+    drawHomeScreen();
+  } else if (gameState === 'howtoplay') {
+    drawHowToPlayScreen();
+  } else if (gameState === 'pause') {
+    drawPauseScreen();
+  } else if (gameState === 'reward') {
+    drawRewardScreen();
+  } else if (gameState === 'victory') {
+    drawEndScreen(true);
+  } else if (gameState === 'gameover') {
+    drawEndScreen(false);
+  }
+
+  ctx.restore();
+}
+
+function drawCastleWall() {
+  ctx.fillStyle = '#263238';
+  ctx.fillRect(0, 240, W, 140);
+
+  ctx.strokeStyle = '#1b2428';
+  ctx.lineWidth = 2;
+  for (let row = 0; row < 5; row++) {
+    const y = 240 + row * 28;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+
+    const offset = (row % 2) * 45;
+    for (let x = offset; x < W; x += 90) {
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x, y + 28);
+      ctx.stroke();
+    }
+  }
+
+  for (let i = 0; i < 9; i++) {
+    const x = 12 + i * 80;
+    ctx.fillStyle = '#37474f';
+    ctx.fillRect(x, 215, 52, 28);
+    ctx.fillStyle = '#546e7a';
+    ctx.fillRect(x, 215, 52, 4);
+  }
+
+  if (wallHP < 70) {
+    ctx.strokeStyle = '#10171d';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(140, 250);
+    ctx.lineTo(165, 290);
+    ctx.lineTo(150, 330);
+    ctx.stroke();
+  }
+  if (wallHP < 40) {
+    ctx.beginPath();
+    ctx.moveTo(510, 240);
+    ctx.lineTo(490, 285);
+    ctx.lineTo(520, 340);
+    ctx.stroke();
+  }
+
+  drawBanner(70, 210, '#c62828', '#ffd54f');
+  drawBanner(645, 210, '#1565c0', '#ffd54f');
+
+  wallDefenders.forEach(d => {
+    drawWallDefender(d.x, d.y, d.type, d.arch);
+  });
+}
+
+function drawBanner(x, y, bgCol, trimCol) {
+  ctx.save();
+  ctx.fillStyle = bgCol;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + 28, y);
+  ctx.lineTo(x + 28, y + 55);
+  ctx.lineTo(x + 14, y + 42);
+  ctx.lineTo(x, y + 55);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = trimCol;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawWallDefender(x, y, type, arch) {
+  ctx.save();
+  ctx.translate(x, y);
+  const bounce = Math.sin(globalTime * 12) * 3;
+  ctx.translate(0, bounce);
+
+  ctx.fillStyle = arch === ARCHETYPES.PRINCE ? '#ffd875' : '#90a4ae';
+  ctx.beginPath();
+  ctx.arc(0, -22, 11, Math.PI, 0);
+  ctx.lineTo(11, -12);
+  ctx.lineTo(-11, -12);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = '#263238';
+  ctx.fillRect(-6, -18, 12, 3);
+
+  ctx.fillStyle = type.color;
+  ctx.fillRect(-9, -12, 18, 16);
+
+  if (arch === ARCHETYPES.ARCHER) {
+    ctx.strokeStyle = '#8d6e63';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(14, -12, 16, -Math.PI / 2, Math.PI / 2);
+    ctx.stroke();
+  } else {
+    ctx.strokeStyle = '#b0bec5';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(12, 6);
+    ctx.lineTo(12, -34);
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffd54f';
+    ctx.beginPath();
+    ctx.moveTo(12, -42);
+    ctx.lineTo(16, -34);
+    ctx.lineTo(8, -34);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawInfirmaryInterior() {
+  const floorGrad = ctx.createLinearGradient(0, 380, 0, H);
+  floorGrad.addColorStop(0, '#192330');
+  floorGrad.addColorStop(0.35, '#111822');
+  floorGrad.addColorStop(1, '#090e15');
+  ctx.fillStyle = floorGrad;
+  ctx.fillRect(0, 380, W, H - 380);
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  ctx.lineWidth = 2;
+  for (let y = 390; y < H; y += 45) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = '#263445';
+  ctx.lineWidth = 14;
+  for (let i = 0; i < 3; i++) {
+    const x = [130, 360, 590][i];
+    ctx.beginPath();
+    ctx.arc(x, 630, 100, Math.PI, 0);
+    ctx.stroke();
+  }
+
+  drawTorch(40, 480);
+  drawTorch(245, 480);
+  drawTorch(475, 480);
+  drawTorch(680, 480);
+}
+
+function drawTorch(x, y) {
+  ctx.save();
+  ctx.fillStyle = '#212121';
+  ctx.fillRect(x - 4, y, 8, 22);
+
+  const flicker = Math.sin(globalTime * 15 + x) * 2;
+  const radGrad = ctx.createRadialGradient(x, y - 6, 4, x, y - 6, 75);
+  radGrad.addColorStop(0, 'rgba(255, 179, 0, 0.28)');
+  radGrad.addColorStop(0.6, 'rgba(255, 87, 34, 0.08)');
+  radGrad.addColorStop(1, 'transparent');
+  ctx.fillStyle = radGrad;
+  ctx.beginPath();
+  ctx.arc(x, y - 6, 75, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#ff9800';
+  ctx.beginPath();
+  ctx.ellipse(x, y - 8 + flicker * 0.5, 6, 12, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawBed(bed) {
+  ctx.save();
+  const { x, y, w, h, type, patient, treatProgress } = bed;
+  const col = type.color;
+
+  ctx.fillStyle = 'rgba(16, 24, 35, 0.88)';
+  roundRect(ctx, x - w/2, y - 110, w, h + 10, 14);
+  ctx.fill();
+
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  ctx.fillStyle = type.dark;
+  roundRect(ctx, x - 72, y - 102, 144, 28, 14);
+  ctx.fill();
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 13px Cinzel, Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`${type.icon} ${type.name}`, x, y - 88);
+
+  ctx.fillStyle = '#4e342e';
+  roundRect(ctx, x - 55, y - 50, 110, 130, 8);
+  ctx.fill();
+  ctx.strokeStyle = '#8d6e63';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.fillStyle = '#eceff1';
+  roundRect(ctx, x - 48, y - 25, 96, 100, 6);
+  ctx.fill();
+
+  ctx.fillStyle = '#cfd8dc';
+  roundRect(ctx, x - 42, y - 44, 84, 24, 6);
+  ctx.fill();
+
+  // Hover or Tap-to-Place Target Highlight
+  let isHovered = false;
+  activeTouches.forEach(t => {
+    if (t.dragKnight && Math.hypot(t.x - x, t.y - y) < 130) isHovered = true;
+  });
+  if (selectedQueueKnight && selectedQueueKnight.type === type && !patient) {
+    isHovered = true;
+  }
+
+  if (isHovered && !patient) {
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 4;
+    ctx.setLineDash([8, 6]);
+    ctx.beginPath();
+    ctx.arc(x, y + 10, 85, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = col + '33';
+    ctx.fill();
+  }
+
+  if (patient) {
+    drawKnightSprite(x, y - 2, patient, 0.95, false);
+
+    const progress = treatProgress / patient.type.healTime;
+    const lifeRatio = Math.max(0, patient.life / patient.maxLife);
+
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    roundRect(ctx, x - 55, y + 74, 110, 10, 5);
+    ctx.fill();
+
+    ctx.fillStyle = lifeRatio > 0.4 ? col : '#ff1744';
+    roundRect(ctx, x - 55, y + 74, 110 * lifeRatio, 10, 5);
+    ctx.fill();
+
+    if (!patient.isPurified) {
+      const pulse = 1 + Math.sin(globalTime * 10) * 0.08;
+      ctx.save();
+      ctx.translate(x, y + 102);
+      ctx.scale(pulse, pulse);
+      ctx.fillStyle = '#b388ff';
+      roundRect(ctx, -56, -13, 112, 26, 13);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 11px Cinzel, Georgia, serif';
+      ctx.fillText('TAP TO PURIFY!', 0, 0);
+      ctx.restore();
+    } else if (treatProgress > 0) {
+      ctx.beginPath();
+      ctx.arc(x, y + 15, 34, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, progress));
+      ctx.strokeStyle = '#00e676';
+      ctx.lineWidth = 6;
+      ctx.stroke();
+
+      ctx.fillStyle = '#00e676';
+      ctx.font = 'bold 12px Cinzel, Georgia, serif';
+      ctx.fillText('TREATING...', x, y + 102);
+    } else {
+      const pulse = 1 + Math.sin(globalTime * 8) * 0.08;
+      ctx.save();
+      ctx.translate(x, y + 102);
+      ctx.scale(pulse, pulse);
+      ctx.fillStyle = '#ffd54f';
+      roundRect(ctx, -56, -13, 112, 26, 13);
+      ctx.fill();
+      ctx.fillStyle = '#0a0f18';
+      ctx.font = '900 11px Cinzel, Georgia, serif';
+      ctx.fillText('TAP TO HEAL!', 0, 0);
+      ctx.restore();
+    }
+  } else {
+    ctx.fillStyle = '#78909c';
+    ctx.font = '12px Cinzel, Georgia, serif';
+    ctx.fillText('EMPTY BED', x, y + 25);
+    ctx.font = '10px Georgia, serif';
+    ctx.fillStyle = '#546e7a';
+    ctx.fillText(selectedQueueKnight ? 'Tap To Place' : 'Drop Knight Here', x, y + 42);
+  }
+  ctx.restore();
+}
+
+function drawAttackerCommandBar() {
+  ctx.save();
+  // Top Attacker Command Banner
+  ctx.fillStyle = 'rgba(38, 14, 18, 0.94)';
+  roundRect(ctx, 18, 110, 684, 88, 12);
+  ctx.fill();
+  ctx.strokeStyle = '#ff5252';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.fillStyle = '#ff8a80';
+  ctx.font = 'bold 13px Cinzel, Georgia, serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('👑 ATTACKER: SIEGE WARLORD (TAP TO LAUNCH)', 36, 132);
+
+  ctx.fillStyle = '#ffd875';
+  ctx.font = 'bold 14px Georgia, serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(`⏳ TIME: ${Math.ceil(vsTimeLeft)}s`, 684, 132);
+
+  // 4 Attacker Buttons
+  const keys = ['catapult', 'arrowVolley', 'ladderRush', 'plagueBomb'];
+  keys.forEach((k, idx) => {
+    const sk = attackerSkills[k];
+    const bx = 36 + idx * 163;
+    const by = 144;
+    const isReady = sk.timer <= 0;
+
+    ctx.fillStyle = isReady ? '#4a151b' : '#211012';
+    roundRect(ctx, bx, by, 150, 46, 8);
+    ctx.fill();
+
+    ctx.strokeStyle = isReady ? '#ff5252' : '#5c2227';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.font = '18px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(sk.icon, bx + 24, by + 23);
+
+    ctx.font = 'bold 11px Cinzel, Georgia, serif';
+    ctx.fillStyle = isReady ? '#ffffff' : '#9e9e9e';
+    ctx.fillText(isReady ? sk.name : `${Math.ceil(sk.timer)}s`, bx + 85, by + 23);
+  });
+  ctx.restore();
+}
+
+function drawKnightSprite(x, y, knight, scale=1.0, isDragging=false) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(scale, scale);
+
+  const bob = isDragging ? Math.sin(globalTime * 15) * 4 : Math.sin(globalTime * 4 + knight.bobOffset) * 2;
+  ctx.translate(0, bob);
+
+  const typeCol = knight.type.color;
+
+  // Selected Knight Glowing Aura
+  if (selectedQueueKnight === knight) {
+    ctx.strokeStyle = '#ffd875';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, 48, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 216, 117, 0.2)';
+    ctx.fill();
+  }
+
+  if (knight.arch === ARCHETYPES.PLAGUE && !knight.isPurified) {
+    const miasma = ctx.createRadialGradient(0, 0, 5, 0, 0, 45);
+    miasma.addColorStop(0, 'rgba(179, 136, 255, 0.6)');
+    miasma.addColorStop(1, 'transparent');
+    ctx.fillStyle = miasma;
+    ctx.beginPath();
+    ctx.arc(0, 0, 45, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(0, 28, 26, 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = knight.arch === ARCHETYPES.PRINCE ? '#ffd875' : typeCol;
+  roundRect(ctx, -18, -14, 36, 36, 6);
+  ctx.fill();
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(-3, -8, 6, 22);
+  ctx.fillRect(-10, -2, 20, 6);
+
+  ctx.fillStyle = knight.arch === ARCHETYPES.PRINCE ? '#ffe082' : '#cfd8dc';
+  ctx.beginPath();
+  ctx.arc(-20, -6, 9, 0, Math.PI * 2);
+  ctx.arc(20, -6, 9, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#78909c';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.fillStyle = knight.arch === ARCHETYPES.PRINCE ? '#ffecb3' : '#90a4ae';
+  ctx.beginPath();
+  ctx.arc(0, -32, 18, Math.PI, 0);
+  ctx.lineTo(16, -14);
+  ctx.lineTo(-16, -14);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = '#1c2833';
+  ctx.fillRect(-10, -32, 20, 4);
+
+  if (knight.arch === ARCHETYPES.PRINCE) {
+    ctx.fillStyle = '#ffd700';
+    ctx.beginPath();
+    ctx.moveTo(-12, -40);
+    ctx.lineTo(-12, -50);
+    ctx.lineTo(-6, -44);
+    ctx.lineTo(0, -52);
+    ctx.lineTo(6, -44);
+    ctx.lineTo(12, -50);
+    ctx.lineTo(12, -40);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    ctx.fillStyle = typeCol;
+    ctx.beginPath();
+    ctx.ellipse(0, -52, 6, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Triage Badge
+  ctx.save();
+  ctx.translate(0, -64);
+  ctx.fillStyle = 'rgba(10, 16, 26, 0.9)';
+  ctx.beginPath();
+  ctx.arc(0, 0, 18, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = typeCol;
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  ctx.font = '15px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(knight.type.icon, 0, 1);
+  ctx.restore();
+
+  ctx.restore();
+}
+
+function drawQueueArea() {
+  ctx.fillStyle = 'rgba(14, 21, 31, 0.94)';
+  roundRect(ctx, 25, 960, 670, 275, 14);
+  ctx.fill();
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.fillStyle = '#d4af37';
+  ctx.font = 'bold 15px Cinzel, Georgia, serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('⚔️ FIELD QUEUE (WOUNDED ARRIVALS)', 46, 990);
+
+  ctx.font = '12px Georgia, serif';
+  ctx.fillStyle = '#b0bec5';
+  ctx.textAlign = 'right';
+  ctx.fillText(gameMode === 'vs' ? '🛡️ DEFENDER: TAP OR DRAG TO BED' : '👆 TAP OR DRAG KNIGHT TO BED', 670, 990);
+
+  const activeQueue = queueKnights.filter(k => !k.dragged && !k.inBed);
+  if (activeQueue.length === 0) {
+    ctx.fillStyle = '#546e7a';
+    ctx.font = 'italic 16px Georgia, serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('The courtyard is quiet... Hold ready for the next wave!', 360, 1090);
+  } else {
+    activeQueue.forEach((k) => {
+      drawKnightSprite(k.x, k.y, k, 1.0, false);
+
+      const lifeRatio = Math.max(0, k.life / k.maxLife);
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      roundRect(ctx, k.x - 45, k.y + 44, 90, 8, 4);
+      ctx.fill();
+
+      ctx.fillStyle = lifeRatio > 0.4 ? k.type.color : '#ff1744';
+      roundRect(ctx, k.x - 45, k.y + 44, 90 * lifeRatio, 8, 4);
+      ctx.fill();
+    });
+  }
+}
+
+function drawCatapultsAndProjectiles() {
+  catapultRocks.forEach(rock => {
+    ctx.save();
+    const grad = ctx.createRadialGradient(rock.x, rock.y, 4, rock.x, rock.y, rock.size * 2);
+    grad.addColorStop(0, '#fff59d');
+    grad.addColorStop(0.4, '#ff9800');
+    grad.addColorStop(1, 'transparent');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(rock.x, rock.y, rock.size * 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#37474f';
+    ctx.beginPath();
+    ctx.arc(rock.x, rock.y, rock.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+
+  archerArrows.forEach(arr => {
+    ctx.strokeStyle = '#ffd875';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(arr.x, arr.y);
+    ctx.lineTo(arr.tx, arr.ty);
+    ctx.stroke();
+  });
+}
+
+function drawParticlesAndTexts() {
+  particles.forEach(pt => {
+    ctx.fillStyle = pt.color;
+    ctx.globalAlpha = pt.alpha;
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1.0;
+
+  floatingTexts.forEach(ft => {
+    ctx.save();
+    ctx.globalAlpha = ft.alpha;
+    ctx.font = `bold ${ft.size}px Cinzel, Georgia, serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.strokeStyle = '#06090e';
+    ctx.lineWidth = 4;
+    ctx.strokeText(ft.text, ft.x, ft.y);
+    ctx.fillStyle = ft.color;
+    ctx.fillText(ft.text, ft.x, ft.y);
+    ctx.restore();
+  });
+}
+
+function drawHUD() {
+  ctx.fillStyle = 'rgba(11, 17, 26, 0.94)';
+  roundRect(ctx, 18, 16, 684, 82, 12);
+  ctx.fill();
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffd875';
+  ctx.font = '900 24px Cinzel, Georgia, serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('SIEGE ROUNDS', 36, 44);
+
+  ctx.fillStyle = '#90a4ae';
+  ctx.font = '12px Georgia, serif';
+  ctx.fillText(gameMode === 'vs' ? '⚔️ 1v1 VERSUS: ATTACKER VS DEFENDER' : `Solo Defense • Wave ${currentWave} / 5`, 36, 68);
+
+  // Sound Button (585, 26)
+  ctx.fillStyle = soundOn ? '#2e7d32' : '#c62828';
+  roundRect(ctx, 585, 24, 46, 34, 8);
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '15px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(soundOn ? '🔊' : '🔇', 608, 45);
+
+  // Pause Button (642, 26)
+  ctx.fillStyle = '#37474f';
+  roundRect(ctx, 642, 24, 46, 34, 8);
+  ctx.fill();
+  ctx.fillStyle = '#ffd875';
+  ctx.fillText('⏸', 665, 45);
+
+  // Wall Health Container (Lower in VS mode to make room for attacker command bar)
+  const wallBoxY = gameMode === 'vs' ? 208 : 108;
+  ctx.fillStyle = 'rgba(11, 17, 26, 0.94)';
+  roundRect(ctx, 18, wallBoxY, 684, 60, 12);
+  ctx.fill();
+  ctx.strokeStyle = '#26384e';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  const wallRatio = Math.max(0, wallHP / maxWallHP);
+  ctx.fillStyle = '#1a232f';
+  roundRect(ctx, 36, wallBoxY + 28, 460, 20, 10);
+  ctx.fill();
+
+  const hpGrad = ctx.createLinearGradient(36, 0, 496, 0);
+  if (wallRatio > 0.5) {
+    hpGrad.addColorStop(0, '#00e676');
+    hpGrad.addColorStop(1, '#69f0ae');
+  } else if (wallRatio > 0.25) {
+    hpGrad.addColorStop(0, '#ff9100');
+    hpGrad.addColorStop(1, '#ffc400');
+  } else {
+    hpGrad.addColorStop(0, '#d50000');
+    hpGrad.addColorStop(1, '#ff1744');
+  }
+  ctx.fillStyle = hpGrad;
+  roundRect(ctx, 36, wallBoxY + 28, 460 * wallRatio, 20, 10);
+  ctx.fill();
+
+  ctx.fillStyle = '#cfd8dc';
+  ctx.font = 'bold 12px Cinzel, Georgia, serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(`🏰 KEEP WALL INTEGRITY: ${Math.ceil(wallHP)} / ${maxWallHP} HP`, 38, wallBoxY + 20);
+
+  ctx.fillStyle = '#ffd875';
+  ctx.font = 'bold 18px Cinzel, Georgia, serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(`✦ ${score}`, 684, wallBoxY + 38);
+
+  // Emergency Skills (Bottom Right over infirmary)
+  drawSkillButton(520, 600, skills.elixir);
+  drawSkillButton(625, 600, skills.shield);
+}
+
+function drawSkillButton(x, y, skill) {
+  const isReady = skill.timer <= 0;
+  ctx.save();
+  ctx.fillStyle = isReady ? '#1c2d42' : '#111720';
+  roundRect(ctx, x, y, 76, 44, 8);
+  ctx.fill();
+
+  ctx.strokeStyle = isReady ? '#ffd875' : '#455a64';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.font = '18px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(skill.icon, x + 24, y + 22);
+
+  ctx.font = 'bold 10px Cinzel, Georgia, serif';
+  ctx.fillStyle = isReady ? '#ffd875' : '#78909c';
+  ctx.fillText(isReady ? 'READY' : `${Math.ceil(skill.timer)}s`, x + 54, y + 22);
+  ctx.restore();
+}
+
+function drawTutorialHint() {
+  ctx.save();
+  const bannerY = tutorialStep === 1 ? 905 : 620;
+  ctx.fillStyle = 'rgba(212, 175, 55, 0.95)';
+  roundRect(ctx, 80, bannerY, 560, 48, 24);
+  ctx.fill();
+
+  ctx.fillStyle = '#06090e';
+  ctx.font = 'bold 15px Cinzel, Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  if (tutorialStep === 1) {
+    ctx.fillText('👉 TAP or DRAG wounded knight to MATCHING colored bed!', 360, bannerY + 24);
+  } else if (tutorialStep === 2) {
+    ctx.fillText('⚡ TAP the occupied bed rapidly to heal the knight!', 360, bannerY + 24);
+  }
+  ctx.restore();
+}
+
+// -------------------------------------------------------------
+// MENUS & OVERLAY SCREENS
+// -------------------------------------------------------------
+
+// HOME SCREEN
+function drawHomeScreen() {
+  ctx.fillStyle = 'rgba(6, 9, 14, 0.92)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = '#141e2b';
+  roundRect(ctx, 50, 240, 620, 780, 16);
+  ctx.fill();
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffd875';
+  ctx.font = '900 48px Cinzel, Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('SIEGE ROUNDS', 360, 330);
+
+  ctx.fillStyle = '#a0b3c6';
+  ctx.font = '16px Georgia, serif';
+  ctx.fillText('Castle Infirmary Triage Defense', 360, 375);
+
+  ctx.fillStyle = '#cfd8dc';
+  ctx.font = '15px Georgia, serif';
+  ctx.fillText('The enemy siege engines are battering the castle walls!', 360, 445);
+  ctx.fillText('Drag or tap wounded knights into matching triage cots.', 360, 475);
+  ctx.fillText('Tap to heal them so they rush to defend the battlements!', 360, 505);
+
+  // Solo Button
+  ctx.fillStyle = '#d4af37';
+  roundRect(ctx, 110, 565, 500, 78, 14);
+  ctx.fill();
+  ctx.strokeStyle = '#fff8e1';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.fillStyle = '#06090e';
+  ctx.font = '900 24px Cinzel, Georgia, serif';
+  ctx.fillText('🛡️ PLAY SOLO DEFENSE', 360, 603);
+  ctx.font = '13px Georgia, serif';
+  ctx.fillText('One-thumb portrait play • 5 escalating waves', 360, 627);
+
+  // 1v1 Versus Button
+  ctx.fillStyle = '#1e2c3e';
+  roundRect(ctx, 110, 665, 500, 78, 14);
+  ctx.fill();
+  ctx.strokeStyle = '#ff5252';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffd875';
+  ctx.font = '900 22px Cinzel, Georgia, serif';
+  ctx.fillText('⚔️ 1v1 ATTACKER VS DEFENDER', 360, 703);
+  ctx.font = '13px Georgia, serif';
+  ctx.fillStyle = '#ff8a80';
+  ctx.fillText('100% Offline • P1 Warlord (Top) vs P2 Medic (Bottom) on 1 phone', 360, 727);
+
+  // How to Play Button
+  ctx.fillStyle = '#263546';
+  roundRect(ctx, 110, 765, 500, 64, 12);
+  ctx.fill();
+  ctx.strokeStyle = '#78909c';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 18px Cinzel, Georgia, serif';
+  ctx.fillText('📜 HOW TO PLAY & GUIDE', 360, 804);
+
+  // Best Score Footer
+  ctx.fillStyle = '#d4af37';
+  ctx.font = 'bold 16px Georgia, serif';
+  ctx.fillText(`🏆 BEST KEEP DEFENSE SCORE: ${bestScore}`, 360, 880);
+
+  // Sound Toggle Home
+  ctx.fillStyle = soundOn ? '#2e7d32' : '#c62828';
+  roundRect(ctx, 280, 920, 160, 42, 8);
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 13px Cinzel, Georgia, serif';
+  ctx.fillText(soundOn ? '🔊 SOUND ON' : '🔇 SOUND OFF', 360, 946);
+}
+
+// HOW TO PLAY SCREEN
+function drawHowToPlayScreen() {
+  ctx.fillStyle = 'rgba(6, 9, 14, 0.94)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = '#141e2b';
+  roundRect(ctx, 40, 180, 640, 920, 16);
+  ctx.fill();
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffd875';
+  ctx.font = '900 32px Cinzel, Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('FIELD MEDIC GUIDE', 360, 235);
+
+  const tips = [
+    { title: '1. MATCH TRIAGE WARDS (EASY TAP & DRAG)', desc: 'Tap or drag wounded knights to matching colored beds: Red (Critical), Yellow (Urgent), Green (Minor). Tap knight then tap bed works too!' },
+    { title: '2. RAPID TAP TO HEAL', desc: 'Tap occupied beds quickly to treat wounds. Once fully healed, knights rush up to the wall to reinforce defense!' },
+    { title: '3. SPECIAL HERO UNITS', desc: '👑 Royal Prince: +350 pts & wall shield! 🏹 Archers: shoot down catapult fireballs! ☣️ Cursed: tap to purify!' },
+    { title: '4. EMERGENCY POWERS', desc: 'Use Miracle Elixir (🧪) to advance healing on all beds, and Gate Barricade (🛡️) for 6s wall invulnerability.' },
+    { title: '5. 1v1 ATTACKER VS DEFENDER (1 PHONE)', desc: '100% Offline! Player 1 (Top) launches catapults & fire arrows; Player 2 (Bottom) runs the infirmary!' }
+  ];
+
+  tips.forEach((t, i) => {
+    const y = 290 + i * 115;
+    ctx.fillStyle = '#1c2838';
+    roundRect(ctx, 65, y, 590, 98, 10);
+    ctx.fill();
+    ctx.strokeStyle = '#d4af37';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffd875';
+    ctx.font = 'bold 16px Cinzel, Georgia, serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(t.title, 85, y + 32);
+
+    ctx.fillStyle = '#cfd8dc';
+    ctx.font = '14px Georgia, serif';
+    ctx.fillText(t.desc, 85, y + 62);
+  });
+
+  ctx.fillStyle = '#d4af37';
+  roundRect(ctx, 160, 980, 400, 68, 12);
+  ctx.fill();
+  ctx.fillStyle = '#06090e';
+  ctx.font = '900 22px Cinzel, Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('BACK TO HOME', 360, 1022);
+}
+
+// PAUSE SCREEN
+function drawPauseScreen() {
+  ctx.fillStyle = 'rgba(6, 9, 14, 0.88)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = '#141e2b';
+  roundRect(ctx, 90, 360, 540, 560, 16);
+  ctx.fill();
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffd875';
+  ctx.font = '900 36px Cinzel, Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('SIEGE PAUSED', 360, 430);
+
+  ctx.fillStyle = '#a0b3c6';
+  ctx.font = '16px Georgia, serif';
+  ctx.fillText(gameMode === 'vs' ? `1v1 Match • Time: ${Math.ceil(vsTimeLeft)}s` : `Wave ${currentWave} / 5 • Keep Wall: ${Math.ceil(wallHP)}%`, 360, 470);
+
+  // Resume
+  ctx.fillStyle = '#d4af37';
+  roundRect(ctx, 140, 520, 440, 68, 12);
+  ctx.fill();
+  ctx.fillStyle = '#06090e';
+  ctx.font = '900 22px Cinzel, Georgia, serif';
+  ctx.fillText('RESUME BATTLE', 360, 562);
+
+  // Restart
+  ctx.fillStyle = '#1e2c3e';
+  roundRect(ctx, 140, 610, 440, 64, 12);
+  ctx.fill();
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = '#ffd875';
+  ctx.font = 'bold 18px Cinzel, Georgia, serif';
+  ctx.fillText(gameMode === 'vs' ? 'RESTART 1v1 MATCH' : 'RESTART WAVE', 360, 650);
+
+  // Quit to Home
+  ctx.fillStyle = '#263445';
+  roundRect(ctx, 140, 695, 440, 64, 12);
+  ctx.fill();
+  ctx.strokeStyle = '#78909c';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 18px Cinzel, Georgia, serif';
+  ctx.fillText('QUIT TO HOME', 360, 735);
+
+  // Sound
+  ctx.fillStyle = soundOn ? '#2e7d32' : '#c62828';
+  roundRect(ctx, 220, 785, 280, 45, 8);
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 14px Cinzel, Georgia, serif';
+  ctx.fillText(soundOn ? '🔊 SOUND ON' : '🔇 SOUND OFF', 360, 813);
+}
+
+// REWARD SCREEN
+function drawRewardScreen() {
+  ctx.fillStyle = 'rgba(6, 9, 14, 0.9)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = '#141e2b';
+  roundRect(ctx, 50, 310, 620, 660, 16);
+  ctx.fill();
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffd875';
+  ctx.font = '900 28px Cinzel, Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(`⚔️ WAVE ${currentWave} SECURED!`, 360, 370);
+
+  ctx.fillStyle = '#a0b3c6';
+  ctx.font = '15px Georgia, serif';
+  ctx.fillText('Choose one Keep Relic to power your medical defense:', 360, 410);
+
+  rewardOptions.forEach((relic, idx) => {
+    const y = 460 + idx * 130;
+    ctx.fillStyle = '#1c2838';
+    roundRect(ctx, 90, y, 540, 105, 12);
+    ctx.fill();
+    ctx.strokeStyle = '#d4af37';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.font = '34px sans-serif';
+    ctx.fillText(relic.icon, 140, y + 54);
+
+    ctx.fillStyle = '#ffd875';
+    ctx.font = 'bold 18px Cinzel, Georgia, serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(relic.name, 190, y + 42);
+
+    ctx.fillStyle = '#cfd8dc';
+    ctx.font = '14px Georgia, serif';
+    ctx.fillText(relic.desc, 190, y + 74);
+    ctx.textAlign = 'center';
+  });
+
+  ctx.fillStyle = '#90a4ae';
+  ctx.font = 'italic 14px Georgia, serif';
+  ctx.fillText('Tap a relic to claim its power and start the next round', 360, 915);
+}
+
+// VICTORY / GAMEOVER SCREEN
+function drawEndScreen(isVictory) {
+  ctx.fillStyle = 'rgba(6, 9, 14, 0.92)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = '#141e2b';
+  roundRect(ctx, 50, 320, 620, 640, 16);
+  ctx.fill();
+
+  let headerColor = isVictory ? '#ffd875' : '#ff5252';
+  let headerText = isVictory ? 'VICTORY: WALLS HELD!' : 'THE KEEP HAS FALLEN!';
+  let subText = isVictory ? 'The siege broke! Your medical valor saved the realm.' : `Infirmary overwhelmed on Wave ${currentWave}.`;
+
+  if (gameMode === 'vs') {
+    if (vsWinner === 'attacker') {
+      headerColor = '#ff5252';
+      headerText = 'ATTACKER WINS!';
+      subText = 'The siege engines broke the keep wall! The castle has fallen!';
+    } else {
+      headerColor = '#ffd875';
+      headerText = 'DEFENDER WINS!';
+      subText = 'The infirmary held strong until the siege army retreated!';
+    }
+  }
+
+  ctx.strokeStyle = headerColor;
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  ctx.fillStyle = headerColor;
+  ctx.font = '900 36px Cinzel, Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(headerText, 360, 400);
+
+  ctx.fillStyle = '#a0b3c6';
+  ctx.font = '16px Georgia, serif';
+  ctx.fillText(subText, 360, 440);
+
+  ctx.fillStyle = '#0d1520';
+  roundRect(ctx, 90, 480, 540, 200, 12);
+  ctx.fill();
+
+  ctx.fillStyle = '#ffd875';
+  ctx.font = '900 44px Cinzel, Georgia, serif';
+  ctx.fillText(`✦ ${score}`, 360, 545);
+
+  ctx.fillStyle = '#cfd8dc';
+  ctx.font = '16px Georgia, serif';
+  ctx.fillText(`Knights Saved: ${knightsSaved}   •   Wall Integrity: ${Math.ceil(wallHP)}%`, 360, 595);
+  ctx.fillText(`Max Triage Combo: x${maxCombo}   •   Best Score: ${bestScore}`, 360, 630);
+
+  // Play Again Button
+  ctx.fillStyle = '#d4af37';
+  roundRect(ctx, 120, 720, 480, 76, 14);
+  ctx.fill();
+  ctx.fillStyle = '#06090e';
+  ctx.font = '900 24px Cinzel, Georgia, serif';
+  ctx.fillText('PLAY AGAIN', 360, 766);
+
+  // Main Menu Return
+  ctx.fillStyle = '#90a4ae';
+  ctx.font = '15px Georgia, serif';
+  ctx.fillText('Tap here to return to Main Menu', 360, 835);
+}
+
+function roundRect(c, x, y, w, h, r=8) {
+  c.beginPath();
+  c.roundRect(x, y, w, h, r);
+}
+
+// -------------------------------------------------------------
+// TOUCH & POINTER INPUT
+// -------------------------------------------------------------
+function getCanvasCoords(e) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - rect.left) * (W / rect.width),
+    y: (e.clientY - rect.top) * (H / rect.height)
+  };
+}
+
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  canvas.setPointerCapture(e.pointerId);
+  const pt = getCanvasCoords(e);
+  activeTouches.set(e.pointerId, { x: pt.x, y: pt.y, startX: pt.x, startY: pt.y, dragKnight: null });
+
+  // 1. HOME SCREEN CLICKS
+  if (gameState === 'home') {
+    if (pt.x > 280 && pt.x < 440 && pt.y > 920 && pt.y < 962) {
+      soundOn = !soundOn;
+      localStorage.setItem('sr_sound', soundOn ? '1' : '0');
+      playTone(520, 'sine', 0.1, 0.1);
+      return;
+    }
+    if (pt.x > 110 && pt.x < 610 && pt.y > 565 && pt.y < 643) {
+      startGame('solo');
+      return;
+    }
+    if (pt.x > 110 && pt.x < 610 && pt.y > 665 && pt.y < 743) {
+      startGame('vs');
+      return;
+    }
+    if (pt.x > 110 && pt.x < 610 && pt.y > 765 && pt.y < 829) {
+      gameState = 'howtoplay';
+      playTone(440, 'triangle', 0.1, 0.08);
+      return;
+    }
+    return;
+  }
+
+  // 2. HOW TO PLAY SCREEN CLICKS
+  if (gameState === 'howtoplay') {
+    if (pt.x > 160 && pt.x < 560 && pt.y > 980 && pt.y < 1048) {
+      gameState = 'home';
+      playTone(360, 'triangle', 0.1, 0.08);
+      return;
+    }
+    return;
+  }
+
+  // 3. PAUSE SCREEN CLICKS
+  if (gameState === 'pause') {
+    if (pt.x > 140 && pt.x < 580 && pt.y > 520 && pt.y < 588) {
+      gameState = 'play';
+      playTone(520, 'sine', 0.1, 0.1);
+      return;
+    }
+    if (pt.x > 140 && pt.x < 580 && pt.y > 610 && pt.y < 674) {
+      if (gameMode === 'vs') startGame('vs');
+      else restartCurrentWave();
+      return;
+    }
+    if (pt.x > 140 && pt.x < 580 && pt.y > 695 && pt.y < 759) {
+      gameState = 'home';
+      playTone(320, 'sine', 0.1, 0.1);
+      return;
+    }
+    if (pt.x > 220 && pt.x < 500 && pt.y > 785 && pt.y < 830) {
+      soundOn = !soundOn;
+      localStorage.setItem('sr_sound', soundOn ? '1' : '0');
+      playTone(520, 'sine', 0.1, 0.1);
+      return;
+    }
+    return;
+  }
+
+  // 4. REWARD SCREEN CLICKS
+  if (gameState === 'reward') {
+    rewardOptions.forEach((relic, idx) => {
+      const y = 460 + idx * 130;
+      if (pt.x > 90 && pt.x < 630 && pt.y > y && pt.y < y + 105) {
+        selectRelic(idx);
+      }
+    });
+    return;
+  }
+
+  // 5. VICTORY / GAMEOVER CLICKS
+  if (gameState === 'victory' || gameState === 'gameover') {
+    if (pt.x > 120 && pt.x < 600 && pt.y > 720 && pt.y < 796) {
+      startGame(gameMode);
+      return;
+    }
+    if (pt.y > 815 && pt.y < 865) {
+      gameState = 'home';
+      return;
+    }
+    return;
+  }
+
+  // 6. IN-GAME TOP HUD CLICKS
+  if (pt.x > 585 && pt.x < 631 && pt.y > 20 && pt.y < 60) {
+    soundOn = !soundOn;
+    localStorage.setItem('sr_sound', soundOn ? '1' : '0');
+    playTone(520, 'sine', 0.1, 0.1);
+    return;
+  }
+  if (pt.x > 642 && pt.x < 688 && pt.y > 20 && pt.y < 60) {
+    gameState = 'pause';
+    playTone(400, 'sine', 0.1, 0.1);
+    return;
+  }
+
+  // 7. 1v1 ATTACKER SKILLS TAP (Top command bar: y 144 to 190)
+  if (gameMode === 'vs' && pt.y >= 135 && pt.y <= 195) {
+    const keys = ['catapult', 'arrowVolley', 'ladderRush', 'plagueBomb'];
+    keys.forEach((k, idx) => {
+      const bx = 36 + idx * 163;
+      if (pt.x >= bx && pt.x <= bx + 150) {
+        triggerAttackerSkill(k);
+      }
+    });
+    return;
+  }
+
+  // 8. DEFENDER EMERGENCY SKILLS TAP (y 600 to 644)
+  if (pt.x > 520 && pt.x < 596 && pt.y > 600 && pt.y < 644) {
+    activateElixir();
+    return;
+  }
+  if (pt.x > 625 && pt.x < 701 && pt.y > 600 && pt.y < 644) {
+    activateShield();
+    return;
+  }
+
+  // 9. TAP BED: MANUAL HEALING OR TAP-TO-PLACE
+  for (let bed of beds) {
+    // Generous bed touch bounds
+    if (Math.abs(pt.x - bed.x) < 95 && Math.abs(pt.y - bed.y) < 125) {
+      // If bed is empty and we have a selected queue knight -> Tap-to-Place!
+      if (!bed.patient && selectedQueueKnight) {
+        if (bed.type === selectedQueueKnight.type) {
+          bed.patient = selectedQueueKnight;
+          bed.treatProgress = 0;
+          bed.isHealing = false;
+          selectedQueueKnight.inBed = bed;
+          queueKnights = queueKnights.filter(k => k !== selectedQueueKnight);
+          selectedQueueKnight = null;
+
+          vibrate(25);
+          playTone(520, 'triangle', 0.15, 0.1, 740);
+          createParticles(bed.x, bed.y, bed.type.color, 14);
+          addFloatingText(bed.x, bed.y - 40, 'PLACED! TAP TO HEAL', '#ffffff', 18);
+        } else {
+          addFloatingText(bed.x, bed.y - 40, 'WRONG TRIAGE WARD!', '#ff5252', 20);
+          playTone(140, 'sawtooth', 0.2, 0.12);
+        }
+        return;
+      }
+
+      // If bed is occupied -> Rapid tap to heal
+      if (bed.patient) {
+        bed.isHealing = true;
+        bed.treatProgress += 0.35 * perks.healMult;
+        vibrate(15);
+        playTone(480 + bed.idx * 120, 'triangle', 0.1, 0.08);
+
+        if (tutorialStep === 2) tutorialStep = 0;
+        return;
+      }
+    }
+  }
+
+  // 10. TAP OR DRAG QUEUE KNIGHT (Extra generous bounding box for all colors including Green/Minor!)
+  const activeQueue = queueKnights.filter(k => !k.dragged && !k.inBed);
+  for (let knight of activeQueue) {
+    const dx = Math.abs(pt.x - knight.x);
+    const dy = Math.abs(pt.y - knight.y);
+
+    if (dx < 75 && dy < 95) {
+      // Select for tap-to-place
+      selectedQueueKnight = (selectedQueueKnight === knight) ? null : knight;
+
+      // Also enable drag
+      knight.dragged = true;
+      const touch = activeTouches.get(e.pointerId);
+      if (touch) touch.dragKnight = knight;
+      vibrate(15);
+      playTone(360, 'sine', 0.08, 0.06);
+
+      if (tutorialStep === 1) tutorialStep = 2;
+      return;
+    }
+  }
+
+  // If clicked elsewhere in queue, deselect
+  if (pt.y > 960) {
+    selectedQueueKnight = null;
+  }
+});
+
+canvas.addEventListener('pointermove', e => {
+  const touch = activeTouches.get(e.pointerId);
+  if (touch) {
+    const pt = getCanvasCoords(e);
+    touch.x = pt.x;
+    touch.y = pt.y;
+  }
+});
+
+canvas.addEventListener('pointerup', e => {
+  const touch = activeTouches.get(e.pointerId);
+  if (touch) {
+    const pt = getCanvasCoords(e);
+    if (touch.dragKnight) {
+      const knight = touch.dragKnight;
+      knight.dragged = false;
+
+      // Check drop on bed with generous drop bounds
+      let droppedOnBed = null;
+      for (let bed of beds) {
+        if (Math.abs(pt.x - bed.x) < 100 && Math.abs(pt.y - bed.y) < 130) {
+          droppedOnBed = bed;
+          break;
+        }
+      }
+
+      if (droppedOnBed) {
+        if (!droppedOnBed.patient && droppedOnBed.type === knight.type) {
+          droppedOnBed.patient = knight;
+          droppedOnBed.treatProgress = 0;
+          droppedOnBed.isHealing = false;
+          knight.inBed = droppedOnBed;
+          queueKnights = queueKnights.filter(k => k !== knight);
+          selectedQueueKnight = null;
+
+          vibrate(25);
+          playTone(520, 'triangle', 0.15, 0.1, 740);
+          createParticles(droppedOnBed.x, droppedOnBed.y, knight.type.color, 14);
+          addFloatingText(droppedOnBed.x, droppedOnBed.y - 40, 'PLACED! TAP TO HEAL', '#ffffff', 18);
+        } else {
+          const msg = droppedOnBed.patient ? 'BED OCCUPIED!' : 'WRONG TRIAGE WARD!';
+          addFloatingText(droppedOnBed.x, droppedOnBed.y - 40, msg, '#ff5252', 20);
+          playTone(140, 'sawtooth', 0.2, 0.12);
+        }
+      }
+    }
+  }
+  beds.forEach(b => { b.isHealing = false; });
+  activeTouches.delete(e.pointerId);
+});
+
+canvas.addEventListener('pointercancel', e => {
+  const touch = activeTouches.get(e.pointerId);
+  if (touch && touch.dragKnight) {
+    touch.dragKnight.dragged = false;
+  }
+  beds.forEach(b => { b.isHealing = false; });
+  activeTouches.delete(e.pointerId);
+});
+
+// -------------------------------------------------------------
+// MAIN RAF LOOP
+// -------------------------------------------------------------
+let lastTime = performance.now();
+function gameLoop(now) {
+  const dt = Math.min(0.05, (now - lastTime) / 1000);
+  lastTime = now;
+
+  update(dt);
+  draw();
+
+  requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop);
+
+// Service Worker for Offline Play
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  });
+}
+
+})();
+</script>
+</body>
+</html>

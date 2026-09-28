@@ -1,0 +1,10 @@
+{
+  "name": "Siege Rounds",
+  "short_name": "Siege Rounds",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#111a25",
+  "theme_color": "#111a25",
+  "orientation": "portrait",
+  "icons": [{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}
