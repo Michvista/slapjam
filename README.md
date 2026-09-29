@@ -47,7 +47,9 @@ and tools used to the project description. See the
 - **Reinforce the Battlements**: When fully healed, knights celebrate and rush to the castle ramparts, restoring wall integrity and standing guard against catapults.
 - **Relic Forge**: Between waves, forge one of 6 Keep Relics (Royal Field Salve, Granite Bastion, Herbal Tincture, Apothecary Order, Rallying Horn, War Treasury).
 - **Offline Local Duel**: Both players share one phone in portrait. The attacker taps siege weapons in the top half; the defender drags knights to beds and taps to heal in the bottom half. The split controls support simultaneous touch.
-- **Online Duel**: Create or join a room to play attacker versus defender over the internet. Secure WebSocket relays and a direct WebRTC data-channel backup are started together, so the phones can use whichever path connects. Both players need an internet connection; direct play uses PeerJS Cloud for signaling and WebRTC for game data.
+- **Online Duel**: Create or join a room to play attacker versus defender over the internet. It tries secure WebSocket and WebRTC links, with an HTTPS streaming relay as a browser-friendly fallback for restrictive mobile browsers. Both players need internet access. Copy/paste the 20-character invite on phones.
+
+  The HTTPS fallback uses the public [ntfy.sh](https://ntfy.sh) service without an account. Room topics are public to anyone who knows the invite, and messages are cached by the service; the invite is long and randomly generated, but it is not account authentication or end-to-end encryption. Do not share personal information in a room. ntfy.sh documents a 250-message daily cap, so this is intended for short casual matches. Online play depends on third-party relays being reachable; offline local duel does not.
 
 ---
 
@@ -56,9 +58,9 @@ and tools used to the project description. See the
 - **Jam**: Slapjam AI 1 ([itch.io/jam/slapjam-ai-1](https://itch.io/jam/slapjam-ai-1))
 - **Theme**: Castles
 - **Human Creator**: (Your Itch handle)
-- **AI Tools Used**: Google Antigravity, Gemini (as used by the creator), and OpenAI Codex.
+- **AI Tools Used**: Google Antigravity and OpenAI Codex.
 - **Technical Specs**:
   - Pure HTML5 + Canvas 2D + WebAudio synthesis.
-  - No build step or npm packages. Online play loads Paho MQTT from cdnjs and PeerJS on demand from jsDelivr; offline/local modes need neither service.
+  - No build step or npm packages. Online play uses public HTTPS/WebSocket relays and loads Paho MQTT and PeerJS on demand; offline/local modes need no network service.
   - Offline-ready with PWA Service Worker caching.
   - Package size: < 1 MB (well under the 15 MB limit).

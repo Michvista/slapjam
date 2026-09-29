@@ -249,9 +249,17 @@ for (let i=0;i<45;i++) siegeEmbers.push({ x:Math.random()*W, y:Math.random()*H, 
 for (let i=0;i<60;i++) stormRain.push({ x:Math.random()*W, y:Math.random()*H, speed:550+Math.random()*300, len:12+Math.random()*10 });
 
 // ─────────────────────────────────────────────────────────────
-// ONLINE MULTIPLAYER (MQTT relays + parallel WebRTC direct-link backup)
+// ONLINE MULTIPLAYER (MQTT/WebRTC plus HTTPS streaming relay fallback)
 // ─────────────────────────────────────────────────────────────
 let mqttClient = null;
+let ntfyController = null;
+let ntfyTopic = '';
+let ntfySendChain = Promise.resolve();
+let ntfyConnected = false;
+const ntfyPublishTimes = new Map();
+let outgoingMessageSequence = 0;
+const seenOnlineMessages = new Set();
+const seenOnlineMessageOrder = [];
 let peerClient = null;
 let peerDataConnection = null;
 let peerFallbackTimer = null;
@@ -284,10 +292,78 @@ const MQTT_BROKERS = [
 ];
 
 function generateRoomCode() {
+  // This invite doubles as a hard-to-guess ntfy topic name.
+  // The public relay has no account or room ACLs, so short room codes are unsafe.
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-  let code = '';
-  for (let i = 0; i < 4; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
-  return code;
+  const bytes = new Uint8Array(20);
+  if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
+  else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  return Array.from(bytes, b => chars[b % chars.length]).join('');
+}
+
+function startNtfyRelay(code, isHost) {
+  if (ntfyController) ntfyController.abort();
+  const controller = new AbortController();
+  ntfyController = controller;
+  ntfyConnected = false;
+  ntfyTopic = 'siege-rounds-' + code.toLowerCase();
+  ntfySendChain = Promise.resolve();
+  ntfyPublishTimes.clear();
+  let lastMessageId = '';
+  const url = () => 'https://ntfy.sh/' + ntfyTopic + '/json?since=' + encodeURIComponent(lastMessageId || 'all');
+
+  (async () => {
+    let delay = 800;
+    while (!controller.signal.aborted) {
+      try {
+        const response = await fetch(url(), { signal:controller.signal, cache:'no-store' });
+        if (!response.ok || !response.body) throw new Error('HTTPS relay returned ' + response.status);
+        ntfyConnected = true;
+        if (onlineState !== 'connected') {
+          onlineStatus = isHost
+            ? 'HTTPS relay ready. Share the invite code to join.'
+            : 'HTTPS relay ready. Looking for the host...';
+        }
+        delay = 800;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let pending = '';
+        while (!controller.signal.aborted) {
+          const part = await reader.read();
+          if (part.done) break;
+          pending += decoder.decode(part.value, { stream:true });
+          const lines = pending.split('\n');
+          pending = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const item = JSON.parse(line);
+              if (item.event === 'message' && item.id) lastMessageId = item.id;
+              if (item.event === 'message' && item.message) {
+                const payload = typeof item.message === 'string' ? JSON.parse(item.message) : item.message;
+                if (payload && payload.senderId !== currentClientId) {
+                  const stale = Date.now() - (payload.sentAt || 0) >= 15000;
+                  const handshake = ['host_beacon','join_req','join_ack','guest_ready'].includes(payload.type);
+                  const staleGameOverWhileJoining = payload.type === 'gameover' && stale && onlineState !== 'connected';
+                  if (!handshake || !stale) {
+                    if (!staleGameOverWhileJoining) handleOnlineMessage(payload, isHost);
+                  }
+                }
+              }
+            } catch(e) {}
+          }
+        }
+      } catch(e) {
+        if (controller.signal.aborted) break;
+        ntfyConnected = false;
+        if (onlineState !== 'connected') onlineStatus = 'HTTPS relay reconnecting...';
+      }
+      if (!controller.signal.aborted) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay = Math.min(delay * 2, 6000);
+      }
+    }
+  })();
 }
 
 function disconnectMQTT() {
@@ -301,6 +377,12 @@ function disconnectMQTT() {
     try { mqttClient.disconnect(); } catch(e){}
     mqttClient = null;
   }
+  if (ntfyController) { ntfyController.abort(); ntfyController = null; }
+  ntfyConnected = false;
+  ntfyTopic = '';
+  ntfyPublishTimes.clear();
+  seenOnlineMessages.clear();
+  seenOnlineMessageOrder.length = 0;
   if (peerDataConnection) {
     try { peerDataConnection.close(); } catch(e){}
     peerDataConnection = null;
@@ -331,7 +413,7 @@ function loadPeerJS() {
 
 function connectPeerFallback(code, isHost, background = false) {
   if (peerClient && peerRoomCode === code && peerRoomHost === isHost) {
-    if (!background && !(mqttClient && mqttClient.isConnected())) {
+    if (!background && !ntfyConnected && !(mqttClient && mqttClient.isConnected())) {
       onlineStatus = 'Public relays timed out. Waiting for the direct phone link...';
     }
     return;
@@ -351,7 +433,7 @@ function connectPeerFallback(code, isHost, background = false) {
     if (peerFallbackTimer) { clearTimeout(peerFallbackTimer); peerFallbackTimer = null; }
     const detail = String(reason || 'direct connection unavailable').replace(/\s+/g, ' ').slice(0, 80);
     if (background) {
-      if (mqttRelayFailures.length >= MQTT_BROKERS.length && !(mqttClient && mqttClient.isConnected())) {
+      if (!ntfyConnected && mqttRelayFailures.length >= MQTT_BROKERS.length && !(mqttClient && mqttClient.isConnected())) {
         onlineStatus = `All relays timed out; direct link failed (${detail}). Try both phones on the same Wi-Fi or use Offline Local Duel.`;
         onlineState = 'error';
       }
@@ -361,8 +443,10 @@ function connectPeerFallback(code, isHost, background = false) {
       peerRoomHost = null;
       return;
     }
-    onlineStatus = `Online relays timed out and direct connection failed (${detail}). Try the same Wi-Fi or Offline Local Duel.`;
-    onlineState = 'error';
+    if (!ntfyConnected) {
+      onlineStatus = `Online relays timed out and direct connection failed (${detail}). Try Offline Local Duel.`;
+      onlineState = 'error';
+    }
   };
 
   const acceptConnection = (connection) => {
@@ -393,7 +477,7 @@ function connectPeerFallback(code, isHost, background = false) {
       fail(err && (err.type || err.message));
     });
     connection.on('close', () => {
-      if (connectionWasOpen && attempt === peerFallbackId && onlineState !== 'idle') {
+      if (connectionWasOpen && attempt === peerFallbackId && onlineState !== 'idle' && !ntfyConnected) {
         onlineStatus = 'Direct phone connection closed. Return to the menu and reconnect.';
         onlineState = 'error';
       }
@@ -432,18 +516,20 @@ function connectPeerFallback(code, isHost, background = false) {
 
 function startHostBeacon(code) {
   if (beaconInterval) clearInterval(beaconInterval);
+  sendOnlineData({ type:'host_beacon', code });
   beaconInterval = setInterval(() => {
     if (onlineState === 'connected') { clearInterval(beaconInterval); beaconInterval = null; return; }
     sendOnlineData({ type:'host_beacon', code });
-  }, 500);
+  }, 1000);
 }
 
 function startGuestJoin(code) {
   if (beaconInterval) clearInterval(beaconInterval);
+  sendOnlineData({ type:'join_req', code });
   beaconInterval = setInterval(() => {
     if (onlineState === 'connected') { clearInterval(beaconInterval); beaconInterval = null; return; }
     sendOnlineData({ type:'join_req', code });
-  }, 350);
+  }, 1000);
   if (handshakeTimer) clearTimeout(handshakeTimer);
   handshakeTimer = setTimeout(() => {
     if (onlineState === 'joining') {
@@ -464,14 +550,16 @@ function initHostRoom() {
   onlineRole = 'defender';
   playerRole = 'defender';
   onlineStatus = '✅ ROOM CREATED: ' + roomCode + '\nWaiting for opponent to connect...';
+  startNtfyRelay(roomCode, true);
+  startHostBeacon(roomCode);
   connectMQTTRoom(roomCode, true);
   connectPeerFallback(roomCode, true, true);
 }
 
 function joinHostRoom(code) {
   const clean = (code || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-  if (clean.length < 3) {
-    onlineStatus = 'Please enter a valid 4-character room code!';
+  if (clean.length !== 20) {
+    onlineStatus = 'Enter the complete 20-character invite code.';
     return;
   }
   disconnectMQTT();
@@ -483,6 +571,8 @@ function joinHostRoom(code) {
   onlineRole = 'attacker';
   playerRole = 'attacker';
   onlineStatus = 'Connecting to Room ' + roomCode + '...';
+  startNtfyRelay(roomCode, false);
+  startGuestJoin(roomCode);
   connectMQTTRoom(roomCode, false);
   connectPeerFallback(roomCode, false, true);
 }
@@ -515,7 +605,7 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
     if (brokerIdx + 1 < MQTT_BROKERS.length) {
       const next = MQTT_BROKERS[brokerIdx + 1];
       const cause = /timed? ?out|timeout/i.test(String(reason)) ? 'timed out' : 'failed';
-      onlineStatus = `Relay ${broker.host}:${broker.port} ${cause}. Trying ${next.host}:${next.port}...`;
+        if (!ntfyConnected) onlineStatus = `Relay ${broker.host}:${broker.port} ${cause}. Trying ${next.host}:${next.port}...`;
       setTimeout(() => {
         if (attemptId === mqttAttemptId) connectMQTTRoom(code, isHost, brokerIdx + 1);
       }, 250);
@@ -534,11 +624,13 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
           startBackup(responseObject.errorMessage || 'connection closed');
           return;
         }
-        if (gameState === 'play' && gameMode === 'online') {
+        if (gameState === 'play' && gameMode === 'online' && !ntfyConnected) {
           addFloatingText(360, 500, '⚠️ CONNECTION INTERRUPTED', '#ff5252', 24);
         } else {
-          onlineStatus = 'Relay connection lost. Check the phone connection and retry.';
-          onlineState = 'error';
+          if (!ntfyConnected) {
+            onlineStatus = 'Relay connection lost. Check the phone connection and retry.';
+            onlineState = 'error';
+          }
         }
       }
     };
@@ -606,7 +698,12 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
 
 function sendOnlineData(data) {
   if (!roomCode) return;
-  const payload = Object.assign({}, data, { senderId:currentClientId, room:roomCode });
+  const payload = Object.assign({}, data, {
+    senderId:currentClientId,
+    room:roomCode,
+    sentAt:Date.now(),
+    messageId:currentClientId + ':' + (++outgoingMessageSequence)
+  });
   if (mqttClient) {
     try {
       if (mqttClient.isConnected()) {
@@ -620,10 +717,44 @@ function sendOnlineData(data) {
   if (peerDataConnection && peerDataConnection.open) {
     try { peerDataConnection.send(payload); } catch(e){}
   }
+  if (ntfyTopic) {
+    const handshake = data.type === 'host_beacon' || data.type === 'join_req';
+    const now = Date.now();
+    const minimumGap = handshake ? 4500 : data.type === 'wallHP' ? 1000 : 0;
+    const lastNtfyPublish = ntfyPublishTimes.get(data.type) || 0;
+    if (now - lastNtfyPublish >= minimumGap) {
+      ntfyPublishTimes.set(data.type, now);
+      const body = JSON.stringify(payload);
+      ntfySendChain = ntfySendChain.then(async () => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        try {
+          const response = await fetch('https://ntfy.sh/' + ntfyTopic, {
+            method:'POST',
+            headers:{ 'Content-Type':'text/plain;charset=UTF-8' },
+            body,
+            cache:'no-store',
+            signal:controller.signal
+          });
+          if (!response.ok) throw new Error('HTTPS relay publish returned ' + response.status);
+        } finally {
+          clearTimeout(timeout);
+        }
+      }).catch(() => {
+        if (onlineState !== 'connected') onlineStatus = 'HTTPS relay send failed; retrying connection...';
+      });
+    }
+  }
 }
 
 function handleOnlineMessage(data, isHost) {
   if (!data || !data.type) return;
+  if (data.messageId) {
+    if (seenOnlineMessages.has(data.messageId)) return;
+    seenOnlineMessages.add(data.messageId);
+    seenOnlineMessageOrder.push(data.messageId);
+    if (seenOnlineMessageOrder.length > 256) seenOnlineMessages.delete(seenOnlineMessageOrder.shift());
+  }
 
   // Guest requested to join host room
   if (data.type === 'join_req' && isHost) {
@@ -704,7 +835,7 @@ function pasteRoomCodeFromClipboard() {
   if (navigator.clipboard && navigator.clipboard.readText) {
     navigator.clipboard.readText().then(text => {
       if (text) {
-        roomCodeInput = text.replace(/[^A-Za-z0-9]/g, '').slice(0, 6).toUpperCase();
+        roomCodeInput = text.replace(/[^A-Za-z0-9]/g, '').slice(0, 20).toUpperCase();
         playTone(520, 'sine', 0.05, 0.08);
       }
     }).catch(() => {});
@@ -726,7 +857,7 @@ window.addEventListener('keydown', (e) => {
     } else if (e.key === 'Escape') {
       roomCodeInputActive = false;
       e.preventDefault();
-    } else if (/^[a-zA-Z0-9]$/.test(e.key) && roomCodeInput.length < 6) {
+    } else if (/^[a-zA-Z0-9]$/.test(e.key) && roomCodeInput.length < 20) {
       roomCodeInput += e.key.toUpperCase();
       playTone(520, 'sine', 0.05, 0.08);
       e.preventDefault();
@@ -1881,13 +2012,13 @@ function drawOnlineScreen(){
   ctx.fillStyle='#69f0ae'; ctx.font='900 20px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
   ctx.fillText('🏰 OPTION A: HOST BATTLE (DEFENDER)',360,255);
   ctx.fillStyle='#cfd8dc'; ctx.font='13px Georgia,serif';
-  ctx.fillText('Heal knights & hold the keep. Give this 4-letter code to your friend:',360,280);
+  ctx.fillText('Defend the keep or attack the wall. Share the secure invite:',360,280);
 
   if(onlineState==='hosting' || (onlineState==='connected' && onlineRole==='defender')){
     // Room code display
     ctx.fillStyle='#0d1520'; roundRect(ctx,160,295,400,52,10); ctx.fill();
     ctx.strokeStyle='#ffd875'; ctx.lineWidth=2; ctx.stroke();
-    ctx.fillStyle='#ffd875'; ctx.font='900 32px Georgia,serif'; ctx.textBaseline='middle';
+    ctx.fillStyle='#ffd875'; ctx.font='900 18px Georgia,serif'; ctx.textBaseline='middle';
     ctx.fillText(roomCode,360,320);
 
     // Copy Code button
@@ -1923,15 +2054,15 @@ function drawOnlineScreen(){
   ctx.fillStyle='#ffd875'; ctx.font='900 20px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
   ctx.fillText('⚔️ OPTION B: JOIN BATTLE (ATTACKER)',360,505);
   ctx.fillStyle='#cfd8dc'; ctx.font='13px Georgia,serif';
-  ctx.fillText('Command siege engines to breach the wall. Enter host code:',360,530);
+  ctx.fillText('Paste the host’s 20-character invite code:',360,530);
 
   // Code input box
   ctx.fillStyle='#0d1520'; roundRect(ctx,110,545,350,50,10); ctx.fill();
   ctx.strokeStyle=roomCodeInputActive?'#ffd875':'#546e7a'; ctx.lineWidth=2; ctx.stroke();
   ctx.fillStyle=roomCodeInput?'#ffffff':'#78909c';
-  ctx.font=roomCodeInput?'900 26px Georgia,serif':'15px Georgia,serif';
+  ctx.font=roomCodeInput?'900 15px Georgia,serif':'13px Georgia,serif';
   ctx.textBaseline='middle';
-  ctx.fillText(roomCodeInput||'TAP TO ENTER CODE',285,570);
+  ctx.fillText(roomCodeInput||'PASTE INVITE CODE',285,570);
 
   // Paste button
   ctx.fillStyle='#37474f'; roundRect(ctx,475,545,135,50,10); ctx.fill();
@@ -1945,7 +2076,7 @@ function drawOnlineScreen(){
   ctx.fillText('⚔️ JOIN BATTLE (ATTACK)',360,641);
 
   ctx.fillStyle='#ffcc80'; ctx.font='12px Georgia,serif'; ctx.textBaseline='alphabetic';
-  ctx.fillText('Tap input box to type code or paste from clipboard',360,695);
+  ctx.fillText('Copy and paste works best on phones',360,695);
 
   // Status box
   if(onlineStatus){
@@ -2269,7 +2400,7 @@ canvas.addEventListener('pointerdown', e=>{
             if(char === '⌫') {
               roomCodeInput = roomCodeInput.slice(0, -1);
               playTone(360,'sine',0.05,0.06);
-            } else if(roomCodeInput.length < 6) {
+            } else if(roomCodeInput.length < 20) {
               roomCodeInput += char;
               playTone(520,'sine',0.05,0.08);
             }
@@ -2284,10 +2415,10 @@ canvas.addEventListener('pointerdown', e=>{
     // JOIN: Join button
     if(pt.x>140 && pt.x<580 && pt.y>615 && pt.y<670){
       roomCodeInputActive = false;
-      if(roomCodeInput.length>=3){
+      if(roomCodeInput.length===20){
         joinHostRoom(roomCodeInput);
       } else {
-        onlineStatus = 'Enter the host\'s 4-letter room code first!';
+        onlineStatus = 'Paste the complete 20-character invite code first.';
         playTone(180,'sawtooth',0.15,0.1);
       }
       return;
@@ -2490,7 +2621,7 @@ function forceUpdateGame() {
 // Service Worker with auto-update
 if('serviceWorker' in navigator && location.protocol.startsWith('http')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('./sw.js?v=11').then(reg => {
+    navigator.serviceWorker.register('./sw.js?v=12').then(reg => {
       reg.update();
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing;
