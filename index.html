@@ -1132,7 +1132,6 @@ function draw() {
   else if(gameState==='roleselect') drawRoleSelectScreen();
   else if(gameState==='online')  drawOnlineScreen();
   else if(gameState==='howtoplay') drawHowToPlayScreen();
-  else if(gameState==='sponsors') drawSponsorsScreen();
   else if(gameState==='pause')   drawPauseScreen();
   else if(gameState==='reward')  drawRewardScreen();
   else if(gameState==='victory') drawEndScreen(true);
@@ -1142,30 +1141,7 @@ function draw() {
 }
 
 function drawCastleWall() {
-  // A keep silhouette above the curtain wall makes the castle unmistakable
-  // before battle damage and rampart defenders are drawn over it.
-  ctx.fillStyle='#182432';
-  ctx.fillRect(145,151,430,112);
-  ctx.fillRect(115,129,82,142);
-  ctx.fillRect(260,82,200,184);
-  ctx.fillRect(523,129,82,142);
-  ctx.fillRect(235,126,54,141);
-  ctx.fillRect(431,126,54,141);
-  ctx.fillStyle='#263646';
-  for(const [x,y,w] of [[115,117,82],[235,114,54],[260,68,200],[431,114,54],[523,117,82]]){
-    for(let bx=x;bx<x+w;bx+=26) ctx.fillRect(bx,y,14,16);
-  }
-  ctx.fillStyle='#e8b65a';
-  for(const [x,y] of [[145,168],[174,168],[278,118],[307,118],[414,118],[442,118],[547,168],[576,168]]){
-    roundRect(ctx,x,y,9,25,4); ctx.fill();
-  }
   ctx.fillStyle='#263238'; ctx.fillRect(0,240,W,140);
-  // Portcullis arch and iron bars in the curtain wall.
-  ctx.fillStyle='#10171d';
-  ctx.beginPath(); ctx.moveTo(302,380); ctx.lineTo(302,311); ctx.quadraticCurveTo(360,250,418,311); ctx.lineTo(418,380); ctx.closePath(); ctx.fill();
-  ctx.strokeStyle='#59636c'; ctx.lineWidth=4;
-  for(let gx=316;gx<=404;gx+=22){ ctx.beginPath(); ctx.moveTo(gx,306); ctx.lineTo(gx,380); ctx.stroke(); }
-  ctx.beginPath(); ctx.moveTo(303,340); ctx.lineTo(417,340); ctx.stroke();
   ctx.strokeStyle='#1b2428'; ctx.lineWidth=2;
   for(let row=0;row<5;row++){
     const y=240+row*28; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
@@ -1697,57 +1673,6 @@ function drawHomeScreen(){
   ctx.fillStyle='#78909c'; ctx.font='11px Georgia,serif'; ctx.textBaseline='alphabetic';
   ctx.fillText('Slapjam AI Jam Entry • Built with HTML5 Canvas',360,885);
 
-  // Optional jam-partner acknowledgements and transparent tool credits.
-  ctx.fillStyle='#172536'; roundRect(ctx,155,915,410,54,12); ctx.fill();
-  ctx.strokeStyle='#d4af37'; ctx.lineWidth=1.5; ctx.stroke();
-  ctx.fillStyle='#ffd875'; ctx.font='bold 15px Georgia,serif'; ctx.textBaseline='middle';
-  ctx.fillText('🏰 JAM ALLIES & DEVELOPMENT CREDITS',360,942);
-}
-
-function drawSponsorsScreen(){
-  ctx.fillStyle='rgba(6,9,14,0.96)'; ctx.fillRect(0,0,W,H);
-  ctx.fillStyle='#141e2b'; roundRect(ctx,40,120,640,1040,16); ctx.fill();
-  ctx.strokeStyle='#d4af37'; ctx.lineWidth=3; ctx.stroke();
-  ctx.fillStyle='#ffd875'; ctx.font='900 32px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
-  ctx.fillText('THE KEEP’S ALLIES',360,180);
-  ctx.fillStyle='#a0b3c6'; ctx.font='15px Georgia,serif';
-  ctx.fillText('Slapjam AI sponsors • supporting the jam prize pool',360,210);
-
-  const allies=[
-    {name:'Jamboree',tier:'PLATINUM SPONSOR',x:75,y:255,w:570,c:'#d4af37'},
-    {name:'Ziva',tier:'GOLD SPONSOR',x:75,y:345,w:270,c:'#e7bd65'},
-    {name:'AutoSprite',tier:'GOLD SPONSOR',x:375,y:345,w:270,c:'#e7bd65'},
-    {name:'PixelLab',tier:'GOLD SPONSOR',x:75,y:435,w:270,c:'#e7bd65'},
-    {name:'Convai',tier:'GOLD SPONSOR',x:375,y:435,w:270,c:'#e7bd65'},
-    {name:'Rosebud AI',tier:'GOLD SPONSOR',x:75,y:525,w:270,c:'#e7bd65'},
-    {name:'Microjam.xyz',tier:'BRONZE SPONSOR',x:375,y:525,w:270,c:'#bc8f61'}
-  ];
-  allies.forEach(a=>{
-    ctx.fillStyle='#1c2838'; roundRect(ctx,a.x,a.y,a.w,70,10); ctx.fill();
-    ctx.strokeStyle=a.c; ctx.lineWidth=1.5; ctx.stroke();
-    ctx.fillStyle=a.c; ctx.font='900 17px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='middle';
-    ctx.fillText(a.name,a.x+18,a.y+27);
-    ctx.fillStyle='#a0b3c6'; ctx.font='bold 10px Georgia,serif'; ctx.textAlign='right';
-    ctx.fillText(a.tier,a.x+a.w-16,a.y+28);
-  });
-
-  ctx.fillStyle='#0e1a25'; roundRect(ctx,75,625,570,178,12); ctx.fill();
-  ctx.strokeStyle='#597080'; ctx.lineWidth=1; ctx.stroke();
-  ctx.fillStyle='#cfd8dc'; ctx.font='14px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
-  ctx.fillText('Sponsors are acknowledged here; this game does not claim to use every sponsor tool.',360,660);
-  ctx.fillText('The Convai, Rosebud AI and Jamboree side prizes require building with those tools.',360,692);
-  ctx.fillText('See the Slapjam page for prize details and current eligibility.',360,724);
-
-  ctx.fillStyle='#ffd875'; ctx.font='900 18px Georgia,serif';
-  ctx.fillText('DEVELOPMENT TOOLS',360,858);
-  ctx.fillStyle='#cfd8dc'; ctx.font='15px Georgia,serif';
-  ctx.fillText('Google Antigravity • Gemini • OpenAI Codex',360,892);
-  ctx.fillStyle='#90a4ae'; ctx.font='12px Georgia,serif';
-  ctx.fillText('Human creator and full tool credits belong on the itch.io game page.',360,926);
-
-  ctx.fillStyle='#d4af37'; roundRect(ctx,180,1045,360,60,12); ctx.fill();
-  ctx.fillStyle='#111820'; ctx.font='900 19px Georgia,serif'; ctx.textBaseline='middle';
-  ctx.fillText('RETURN TO THE KEEP',360,1075);
 }
 
 // Role selection for 1v1 local
@@ -2110,12 +2035,6 @@ canvas.addEventListener('pointerdown', e=>{
     if(pt.x>100&&pt.x<620&&pt.y>675&&pt.y<731){ gameState='howtoplay'; playTone(440,'triangle',0.1,0.08); return; }
     if(pt.x>160&&pt.x<340&&pt.y>795&&pt.y<839){ soundOn=!soundOn; localStorage.setItem('sr_sound',soundOn?'1':'0'); playTone(520,'sine',0.1,0.1); return; }
     if(pt.x>360&&pt.x<560&&pt.y>795&&pt.y<839){ forceUpdateGame(); return; }
-    if(pt.x>155&&pt.x<565&&pt.y>915&&pt.y<970){ gameState='sponsors'; playTone(520,'triangle',0.1,0.08); return; }
-    return;
-  }
-
-  if(gameState==='sponsors'){
-    if(pt.x>160&&pt.x<560&&pt.y>1040&&pt.y<1110){ gameState='home'; playTone(360,'triangle',0.1,0.08); }
     return;
   }
 

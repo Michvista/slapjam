@@ -4,17 +4,13 @@ A touch-first, mobile portrait HTML5 siege defense and medical triage game built
 
 ---
 
-## Credits for the Itch.io Game Page
+## Jam AI Requirement and Credits
 
-The **Jam Allies & Development Credits** panel in the title screen lists every
-Slapjam sponsor and the AI tools used during development. Add your human creator
-name/itch handle and any teammates to the itch.io project description as required
-by the jam rules.
-
-Sponsor acknowledgement is not a claim that the game was built with each sponsor's
-product. The jam lists separate side prizes for games built with Convai, Rosebud AI,
-and Jamboree; only claim those categories if the project was actually made with that
-tool. See the [official jam page](https://itch.io/jam/slapjam-ai-1) for current rules.
+The jam requires each entry to be made with AI and asks creators to credit the
+human contributors and AI tools on the itch.io game page. It does not require a
+particular AI product or a sponsor's tool. Add the actual human creator/team names
+and tools used to the project description. See the
+[official jam page](https://itch.io/jam/slapjam-ai-1) for the rules.
 
 ---
 
@@ -61,7 +57,6 @@ tool. See the [official jam page](https://itch.io/jam/slapjam-ai-1) for current 
 - **Theme**: Castles
 - **Human Creator**: (Your Itch handle)
 - **AI Tools Used**: Google Antigravity, Gemini (as used by the creator), and OpenAI Codex.
-- **Jam sponsors acknowledged in-game**: Jamboree, Ziva, AutoSprite, PixelLab, Convai, Rosebud AI, and Microjam.xyz. Sponsor names are acknowledgements; this project does not claim to use all sponsor products.
 - **Technical Specs**:
   - Pure HTML5 + Canvas 2D + WebAudio synthesis.
   - No external npm packages. Online multiplayer loads the Paho MQTT browser client from cdnjs; offline/local modes need no relay connection.
