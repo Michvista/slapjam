@@ -46,6 +46,9 @@ and tools used to the project description. See the
 - **Administer Treatment**: Once a knight is in a bed, **tap the bed rapidly** to treat them.
 - **Reinforce the Battlements**: When fully healed, knights celebrate and rush to the castle ramparts, restoring wall integrity and standing guard against catapults.
 - **Relic Forge**: Between waves, forge one of 6 Keep Relics (Royal Field Salve, Granite Bastion, Herbal Tincture, Apothecary Order, Rallying Horn, War Treasury).
+- **Campaign challenge**: Solo waves now require rescuing a rising 72–78% quota and keeping a rising minimum amount of wall integrity. Local and online duels run four escalating 30-second assault phases; the defender must meet rescue and wall targets in every phase.
+- **Online rematches**: Both players press **Continue** after a duel. The ready player waits in the rematch lobby until the other player is ready, then both games restart together.
+- **Attacker scoring**: Every siege action earns points, with a victory bonus weighted by speed and damage dealt.
 - **Offline Local Duel**: Both players share one phone in portrait. The attacker taps siege weapons in the top half; the defender drags knights to beds and taps to heal in the bottom half. The split controls support simultaneous touch.
 - **Online Duel**: Create or join a room to play attacker versus defender over the internet. It tries secure WebSocket and WebRTC links, with an HTTPS streaming relay as a browser-friendly fallback for restrictive mobile browsers. Both players need internet access. Copy/paste the 20-character invite on phones.
 
