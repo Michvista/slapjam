@@ -4,24 +4,17 @@ A touch-first, mobile portrait HTML5 siege defense and medical triage game built
 
 ---
 
-## 🎯 How to Add Your Itch.io Username
+## Credits for the Itch.io Game Page
 
-You can set your Itch username in two ways:
+The **Jam Allies & Development Credits** panel in the title screen lists every
+Slapjam sponsor and the AI tools used during development. Add your human creator
+name/itch handle and any teammates to the itch.io project description as required
+by the jam rules.
 
-### 1. In the Game (Instant & Saved)
-1. Open the game (`index.html`).
-2. On the title screen, look at the **Chief Field Medic** box or tap the **📜 Itch.io Credits & Submission Guide** button.
-3. Type your Itch handle (e.g. `your_username`) into the input field and hit **Save & Return**.
-4. Your username will automatically display across:
-   - The in-game top HUD (`Medic: @your_username`)
-   - High Score Leaderboard records
-   - The Victory Certificate / Defeat debrief screen
-   - It is permanently stored in your browser's `localStorage`.
-
-### 2. On Your Itch.io Game Page & Description
-When uploading your game to itch.io:
-1. In the game description box, paste the pre-formatted credits (or click the **📋 Copy Credits** button right inside the game).
-2. Replace `@your_itch_handle` with your exact Itch username.
+Sponsor acknowledgement is not a claim that the game was built with each sponsor's
+product. The jam lists separate side prizes for games built with Convai, Rosebud AI,
+and Jamboree; only claim those categories if the project was actually made with that
+tool. See the [official jam page](https://itch.io/jam/slapjam-ai-1) for current rules.
 
 ---
 
@@ -68,8 +61,9 @@ When uploading your game to itch.io:
 - **Theme**: Castles
 - **Human Creator**: (Your Itch handle)
 - **AI Tools Used**: Google Antigravity, Gemini (as used by the creator), and OpenAI Codex.
+- **Jam sponsors acknowledged in-game**: Jamboree, Ziva, AutoSprite, PixelLab, Convai, Rosebud AI, and Microjam.xyz. Sponsor names are acknowledgements; this project does not claim to use all sponsor products.
 - **Technical Specs**:
   - Pure HTML5 + Canvas 2D + WebAudio synthesis.
-  - Zero external npm packages, zero runtime dependencies.
+  - No external npm packages. Online multiplayer loads the Paho MQTT browser client from cdnjs; offline/local modes need no relay connection.
   - Offline-ready with PWA Service Worker caching.
   - Package size: < 1 MB (well under the 15 MB limit).
