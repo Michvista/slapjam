@@ -113,9 +113,9 @@ function updateBGM(dt) {
 // GAME CONSTANTS
 // ─────────────────────────────────────────────────────────────
 const TRIAGE = {
-  CRITICAL: { key:'critical', name:'CRITICAL', color:'#ff334b', dark:'#5e0b16', life:10, pts:200, healTime:2.0, wallHeal:16, damage:26, icon:'💀' },
-  URGENT:   { key:'urgent',   name:'URGENT',   color:'#ffb300', dark:'#523800', life:14, pts:130, healTime:1.7, wallHeal:12, damage:18, icon:'⚡' },
-  MINOR:    { key:'minor',    name:'MINOR',    color:'#00e676', dark:'#004722', life:18, pts:85,  healTime:1.4, wallHeal:9,  damage:12, icon:'🛡️' }
+  CRITICAL: { key:'critical', name:'CRITICAL', color:'#ff334b', dark:'#5e0b16', life:9, pts:200, healTime:1.9, wallHeal:16, damage:32, icon:'💀' },
+  URGENT:   { key:'urgent',   name:'URGENT',   color:'#ffb300', dark:'#523800', life:13, pts:130, healTime:1.6, wallHeal:12, damage:24, icon:'⚡' },
+  MINOR:    { key:'minor',    name:'MINOR',    color:'#00e676', dark:'#004722', life:17, pts:85,  healTime:1.3, wallHeal:9,  damage:18, icon:'🛡️' }
 };
 
 const ARCHETYPES = {
@@ -232,8 +232,8 @@ let beds = [
 
 // Game numbers
 let currentWave=1, wallHP=120, maxWallHP=120, score=0, combo=0, maxCombo=0;
-let knightsSaved=0, knightsLost=0, waveSpawned=0, spawnTimer=0.6;
-let globalTime=0, screenShake=0, tutorialStep=1, selectedQueueKnight=null;
+let knightsSaved=0, knightsLost=0, waveKnightsSaved=0, waveKnightsLost=0, waveSpawned=0, spawnTimer=0.6;
+let globalTime=0, screenShake=0, tutorialStep=1, selectedQueueKnight=null, gameOverReason='';
 let assassinActive=false, assassinTimer=0;
 
 // Particles & effects
@@ -355,6 +355,7 @@ function startGame(mode) {
   wallHP = 120;
   score = 0; combo = 0; maxCombo = 0;
   knightsSaved = 0; knightsLost = 0;
+  waveKnightsSaved = 0; waveKnightsLost = 0;
   waveSpawned = 0; spawnTimer = 0.7;
   screenShake = 0; selectedQueueKnight = null;
   assassinActive = false; assassinTimer = 0;
@@ -381,6 +382,7 @@ function restartCurrentWave() {
   gameState = 'play';
   wallHP = Math.min(maxWallHP, wallHP + 20);
   waveSpawned = 0; spawnTimer = 0.8;
+  waveKnightsSaved = 0; waveKnightsLost = 0;
   selectedQueueKnight = null; assassinActive=false;
   queueKnights = [];
   beds.forEach(b=>{ b.patient=null; b.treatProgress=0; b.isHealing=false; });
@@ -438,7 +440,7 @@ function spawnKnight(forceCursed=false, forceBerserker=false) {
 }
 
 function handleKnightDeath(knight, bed=null) {
-  knightsLost++; combo=0;
+  knightsLost++; waveKnightsLost++; combo=0;
   let dmg = Math.round(knight.type.damage * (perks.damageMult||1.0));
   if (knight.arch===ARCHETYPES.PRINCE) dmg=Math.round(35*(perks.damageMult||1.0));
   if (knight.arch===ARCHETYPES.BERSERKER) dmg=Math.round(dmg*1.5);
@@ -472,7 +474,7 @@ function handleKnightDeath(knight, bed=null) {
 function treatKnightSuccess(bed) {
   const p = bed.patient; if(!p) return;
   combo++; if(combo>maxCombo) maxCombo=combo;
-  knightsSaved++; vibrate(30);
+  knightsSaved++; waveKnightsSaved++; vibrate(30);
   const cm = 1+Math.min(combo,12)*0.14*perks.comboBonus;
   let pts = Math.floor(p.type.pts*cm);
   let heal = Math.floor(p.type.wallHeal*(1+(combo>3?0.35:0)));
@@ -591,7 +593,7 @@ function triggerWaveReward() {
   // In infinite mode, every 5 endless waves show a relic reward too
   if (currentWave >= WAVES.length && infiniteMode && (currentWave - WAVES.length) % 5 !== 0) {
     // Skip relic screen, just advance
-    currentWave++; waveSpawned=0; spawnTimer=1.0; gameState='play';
+    currentWave++; waveSpawned=0; waveKnightsSaved=0; waveKnightsLost=0; spawnTimer=1.0; gameState='play';
     addFloatingText(360,520,`♾️ ENDLESS WAVE ${currentWave} — ${getWaveData(currentWave).name}`,'#ff9800',26);
     playChord([587,740,880,1174],'triangle',0.4,0.15);
     return;
@@ -606,7 +608,7 @@ function selectRelic(idx) {
   r.apply(perks,{maxWallHP,wallHP});
   perks.phoenixUsed=false; // reset phoenix each wave
   wallHP=Math.min(maxWallHP,wallHP+18+perks.wallArmor);
-  currentWave++; waveSpawned=0; spawnTimer=1.0;
+  currentWave++; waveSpawned=0; waveKnightsSaved=0; waveKnightsLost=0; spawnTimer=1.0;
   if (currentWave > WAVES.length) infiniteMode = true;
   gameState='play';
   const wd=getWaveData(currentWave);
@@ -620,8 +622,9 @@ function triggerVictory() {
   vibrate([100,50,100,50,200]);
   playChord([523,659,784,1046,1318],'triangle',0.8,0.2);
 }
-function triggerGameOver() {
+function triggerGameOver(reason) {
   gameState='gameover';
+  gameOverReason = reason || `Infirmary overwhelmed on Wave ${currentWave}${infiniteMode?' (Endless)':'/20'}.`;
   if(score>bestScore){ bestScore=score; localStorage.setItem('sr_best',bestScore); }
   vibrate(120);
   playTone(130,'sawtooth',0.8,0.25,45);
@@ -771,7 +774,14 @@ function update(dt) {
 
   if(gameMode==='solo'){
     const anyLeft=queueKnights.length>0||beds.some(b=>b.patient!==null);
-    if(waveSpawned>=wd.knights&&!anyLeft) triggerWaveReward();
+    if(waveSpawned>=wd.knights&&!anyLeft){
+      const minRequired = Math.max(1, Math.ceil(wd.knights * 0.5));
+      if(waveKnightsSaved < minRequired || wallHP <= 0){
+        triggerGameOver(`Infirmary Overrun! Saved ${waveKnightsSaved}/${wd.knights} (Min ${minRequired} needed).`);
+      } else {
+        triggerWaveReward();
+      }
+    }
   }
 }
 
@@ -1056,10 +1066,12 @@ function drawHUD(){
   ctx.fillStyle='rgba(11,17,26,0.94)'; roundRect(ctx,18,16,684,82,12); ctx.fill();
   ctx.strokeStyle='#d4af37'; ctx.lineWidth=2; ctx.stroke();
   ctx.fillStyle='#ffd875'; ctx.font='900 24px Georgia,serif'; ctx.textAlign='left'; ctx.fillText('SIEGE ROUNDS',36,44);
+  const wd = getWaveData(currentWave);
+  const minRequired = Math.max(1, Math.ceil(wd.knights * 0.5));
   const waveLabel=gameMode==='solo'
     ? (infiniteMode
-        ? `♾️ ENDLESS • Wave ${currentWave} — ${getWaveData(currentWave).name}`
-        : `Solo • Wave ${currentWave}/20 — ${getWaveData(currentWave)?.name||''}`)
+        ? `♾️ ENDLESS • Wave ${currentWave} • Saved: ${waveKnightsSaved}/${wd.knights}`
+        : `Solo • Wave ${currentWave}/20 • Saved: ${waveKnightsSaved}/${wd.knights} (Min: ${minRequired})`)
     : `${gameMode==='online'?'🌐 Online':'⚔️ 1v1'} • ${Math.ceil(vsTimeLeft)}s left`;
   ctx.fillStyle='#90a4ae'; ctx.font='11px Georgia,serif'; ctx.fillText(waveLabel,36,68);
 
@@ -1325,7 +1337,7 @@ function drawEndScreen(isVictory){
     ht= infiniteMode ? `♾️ ENDLESS LEGEND — WAVE ${currentWave}!` : 'VICTORY — ALL 20 WAVES HELD!';
     sub= infiniteMode ? `You reached Endless Wave ${currentWave}! The siege never ends... but neither do you.` : 'The siege broke! Your medical valor saved the realm!';
   } else {
-    hc='#ff5252'; ht='THE KEEP HAS FALLEN!'; sub=`Overwhelmed on Wave ${currentWave}${infiniteMode?' (Endless)':'/20'}.`;
+    hc='#ff5252'; ht='THE KEEP HAS FALLEN!'; sub= gameOverReason || `Overwhelmed on Wave ${currentWave}${infiniteMode?' (Endless)':'/20'}.`;
   }
   ctx.strokeStyle=hc; ctx.lineWidth=3; ctx.stroke();
   ctx.fillStyle=hc; ctx.font='900 34px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic'; ctx.fillText(ht,360,390);
