@@ -113,9 +113,9 @@ function updateBGM(dt) {
 // GAME CONSTANTS
 // ─────────────────────────────────────────────────────────────
 const TRIAGE = {
-  CRITICAL: { key:'critical', name:'CRITICAL', color:'#ff334b', dark:'#5e0b16', life:6.5, pts:220, healTime:2.1, wallHeal:16, damage:38, icon:'💀' },
-  URGENT:   { key:'urgent',   name:'URGENT',   color:'#ffb300', dark:'#523800', life:9.5, pts:140, healTime:1.7, wallHeal:12, damage:26, icon:'⚡' },
-  MINOR:    { key:'minor',    name:'MINOR',    color:'#00e676', dark:'#004722', life:13.5,pts:90,  healTime:1.3, wallHeal:9,  damage:18, icon:'🛡️' }
+  CRITICAL: { key:'critical', name:'CRITICAL', color:'#ff334b', dark:'#5e0b16', life:5.2, pts:250, healTime:2.2, wallHeal:14, damage:40, icon:'💀' },
+  URGENT:   { key:'urgent',   name:'URGENT',   color:'#ffb300', dark:'#523800', life:7.8, pts:150, healTime:1.8, wallHeal:10, damage:28, icon:'⚡' },
+  MINOR:    { key:'minor',    name:'MINOR',    color:'#00e676', dark:'#004722', life:11.0,pts:90,  healTime:1.4, wallHeal:7,  damage:20, icon:'🛡️' }
 };
 
 const ARCHETYPES = {
@@ -256,41 +256,76 @@ let roomCodeInputActive = false;
 let onlineStatus = '';
 
 function initPeer() {
-  if (peer) { try{ peer.destroy(); }catch(e){} }
-  const id = Math.random().toString(36).substring(2,8).toUpperCase();
-  peer = new Peer(id, {
-    host: '0.peerjs.com', port: 443, secure: true,
-    config: { iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:global.stun.twilio.com:3478'}] }
-  });
-  peer.on('open', pid => {
-    roomCode = pid;
-    onlineStatus = 'Room code: ' + roomCode + '\nShare with opponent!';
-    onlineState = 'hosting';
-  });
-  peer.on('connection', c => { setupConn(c); });
-  peer.on('error', err => {
-    onlineStatus = 'Connection error: ' + err.type;
+  if (typeof Peer === 'undefined') {
+    onlineStatus = '⚠️ PeerJS library not loaded.\nCheck internet connection and reload.';
     onlineState = 'error';
-  });
+    return;
+  }
+  if (peer) { try{ peer.destroy(); }catch(e){} }
+  const id = 'SR-' + Math.random().toString(36).substring(2,6).toUpperCase();
+  onlineStatus = 'Connecting to Peer server...';
+  onlineState = 'hosting';
+
+  try {
+    peer = new Peer(id, {
+      debug: 1,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+      }
+    });
+    peer.on('open', pid => {
+      roomCode = pid;
+      onlineStatus = 'Room Code: ' + roomCode + '\nWaiting for opponent to join...';
+      onlineState = 'hosting';
+    });
+    peer.on('connection', c => { setupConn(c); });
+    peer.on('error', err => {
+      onlineStatus = 'Connection error: ' + (err.type || err.message || err);
+      onlineState = 'error';
+    });
+  } catch (err) {
+    onlineStatus = 'Peer error: ' + err.message;
+    onlineState = 'error';
+  }
 }
 
 function joinPeer(code) {
-  if (!peer) {
-    const id2 = Math.random().toString(36).substring(2,8).toUpperCase();
+  if (typeof Peer === 'undefined') {
+    onlineStatus = '⚠️ PeerJS library not loaded.\nCheck internet connection!';
+    onlineState = 'error';
+    return;
+  }
+  if (peer) { try{ peer.destroy(); }catch(e){} }
+  const cleanCode = code.trim().toUpperCase();
+  const id2 = 'SR-J' + Math.random().toString(36).substring(2,5).toUpperCase();
+  onlineStatus = 'Connecting to ' + cleanCode + '...';
+  onlineState = 'joining';
+
+  try {
     peer = new Peer(id2, {
-      host:'0.peerjs.com', port:443, secure:true,
-      config:{ iceServers:[{urls:'stun:stun.l.google.com:19302'}] }
+      debug: 1,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+      }
     });
     peer.on('open', () => {
-      const c = peer.connect(code.toUpperCase());
+      const c = peer.connect(cleanCode);
       setupConn(c);
-      onlineStatus = 'Connecting to ' + code + '...';
-      onlineState = 'joining';
+      onlineStatus = 'Handshaking with ' + cleanCode + '...';
     });
     peer.on('error', err => {
-      onlineStatus = 'Error: ' + err.type;
+      onlineStatus = 'Join error: ' + (err.type || err.message || err);
       onlineState = 'error';
     });
+  } catch (err) {
+    onlineStatus = 'Join error: ' + err.message;
+    onlineState = 'error';
   }
 }
 
@@ -720,7 +755,7 @@ function update(dt) {
       if(skills.shield.activeTime>0){
         addFloatingText(rock.targetX,rock.targetY-20,'🛡️ BLOCKED!','#ffd875',22); playTone(300,'triangle',0.2,0.1);
       } else {
-        const rockDmg=rock.size>24?12:8;
+        const rockDmg=rock.size>24?18:14;
         wallHP=Math.max(0,wallHP-rockDmg);
         addFloatingText(rock.targetX,rock.targetY-20,`-${rockDmg} CATAPULT!`,'#ff5252',20);
         if(gameMode==='online') sendOnlineData({type:'wallHP',v:wallHP});
@@ -755,7 +790,7 @@ function update(dt) {
   beds.forEach(bed=>{
     if(!bed.patient) return;
     const p=bed.patient;
-    const decayRate = bed.isHealing ? 0.28 : 1.0;
+    const decayRate = bed.isHealing ? 0.42 : 1.0;
     p.life-=dt*decayRate;
     if(p.life<=0){ handleKnightDeath(p,bed); return; }
 
@@ -775,7 +810,7 @@ function update(dt) {
   if(gameMode==='solo'){
     const anyLeft=queueKnights.length>0||beds.some(b=>b.patient!==null);
     if(waveSpawned>=wd.knights&&!anyLeft){
-      const minRequired = Math.max(1, Math.ceil(wd.knights * 0.5));
+      const minRequired = Math.max(1, Math.ceil(wd.knights * 0.70));
       if(waveKnightsSaved < minRequired || wallHP <= 0){
         triggerGameOver(`Infirmary Overrun! Saved ${waveKnightsSaved}/${wd.knights} (Min ${minRequired} needed).`);
       } else {
@@ -906,7 +941,7 @@ function drawInfirmaryInterior(){
   for(let y=390;y<H;y+=45){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
   ctx.strokeStyle='#263445'; ctx.lineWidth=14;
   for(let i=0;i<3;i++){ const x=[130,360,590][i]; ctx.beginPath(); ctx.arc(x,630,100,Math.PI,0); ctx.stroke(); }
-  drawTorch(40,480); drawTorch(245,480); drawTorch(475,480); drawTorch(680,480);
+  drawTorch(40,425); drawTorch(245,425); drawTorch(475,425); drawTorch(680,425);
 }
 
 function drawTorch(x,y){
@@ -1067,7 +1102,7 @@ function drawHUD(){
   ctx.strokeStyle='#d4af37'; ctx.lineWidth=2; ctx.stroke();
   ctx.fillStyle='#ffd875'; ctx.font='900 24px Georgia,serif'; ctx.textAlign='left'; ctx.fillText('SIEGE ROUNDS',36,44);
   const wd = getWaveData(currentWave);
-  const minRequired = Math.max(1, Math.ceil(wd.knights * 0.5));
+  const minRequired = Math.max(1, Math.ceil(wd.knights * 0.70));
   const waveLabel=gameMode==='solo'
     ? (infiniteMode
         ? `♾️ ENDLESS • Wave ${currentWave} • Saved: ${waveKnightsSaved}/${wd.knights}`
@@ -1098,22 +1133,58 @@ function drawHUD(){
   if(skills.shield.activeTime>0){ ctx.fillStyle='#ffd875'; ctx.font='bold 11px Georgia,serif'; ctx.fillText(`🛡️ IMMUNE ${Math.ceil(skills.shield.activeTime)}s`,38,wby+44); }
   ctx.fillStyle='#ffd875'; ctx.font='bold 18px Georgia,serif'; ctx.textAlign='right'; ctx.fillText(`✦ ${score}`,684,wby+38);
 
-  // 4 defender skill buttons
-  drawSkillButton(18,600,skills.elixir,()=>activateElixir());
-  drawSkillButton(122,600,skills.shield,()=>activateShield());
-  drawSkillButton(226,600,skills.rally,()=>activateRally());
-  drawSkillButton(330,600,skills.fortress,()=>activateFortress());
+  // 4 Defender Emergency Skill Dock (Cleanly centered above the beds at y = 490)
+  const isDefender = (gameMode !== 'online') || (playerRole === 'defender');
+  if (isDefender) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(10, 16, 26, 0.94)';
+    roundRect(ctx, 24, 490, 672, 70, 12);
+    ctx.fill();
+    ctx.strokeStyle = '#d4af37';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffd875';
+    ctx.font = 'bold 11px Georgia,serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('⚡ DEFENDER POWERS (TAP TO CAST)', 36, 506);
+
+    drawDockSkillButton(34, 512, 154, 40, skills.elixir);
+    drawDockSkillButton(196, 512, 154, 40, skills.shield);
+    drawDockSkillButton(358, 512, 154, 40, skills.rally);
+    drawDockSkillButton(520, 512, 154, 40, skills.fortress);
+    ctx.restore();
+  }
 }
 
-function drawSkillButton(x,y,skill){
-  const ready=skill.timer<=0;
+function drawDockSkillButton(x, y, w, h, skill) {
+  const ready = skill.timer <= 0;
   ctx.save();
-  ctx.fillStyle=ready?'#1c2d42':'#111720'; roundRect(ctx,x,y,96,44,8); ctx.fill();
-  ctx.strokeStyle=ready?'#ffd875':'#455a64'; ctx.lineWidth=1.5; ctx.stroke();
-  ctx.font='18px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(skill.icon,x+22,y+22);
-  ctx.font='bold 10px Georgia,serif'; ctx.fillStyle=ready?'#ffd875':'#78909c';
-  ctx.fillText(ready?skill.name:`${Math.ceil(skill.timer)}s`,x+60,y+14);
-  if(!ready){ const fill=(skill.cooldown-skill.timer)/skill.cooldown; ctx.fillStyle='rgba(0,200,100,0.2)'; roundRect(ctx,x,y+34,96*fill,10,4); ctx.fill(); }
+  ctx.fillStyle = ready ? '#1c2d42' : '#111720';
+  roundRect(ctx, x, y, w, h, 8);
+  ctx.fill();
+
+  ctx.strokeStyle = ready ? (skill.activeTime > 0 ? '#00e676' : '#ffd875') : '#37474f';
+  ctx.lineWidth = ready ? 1.8 : 1;
+  ctx.stroke();
+
+  ctx.font = '18px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(skill.icon, x + 20, y + h/2);
+
+  ctx.font = 'bold 11px Georgia,serif';
+  ctx.fillStyle = ready ? '#ffffff' : '#78909c';
+  ctx.textAlign = 'left';
+  const label = skill.activeTime > 0 ? `${Math.ceil(skill.activeTime)}s ON` : (ready ? skill.name : `${Math.ceil(skill.timer)}s`);
+  ctx.fillText(label, x + 38, y + h/2);
+
+  if (!ready) {
+    const fill = (skill.cooldown - skill.timer) / skill.cooldown;
+    ctx.fillStyle = 'rgba(0, 230, 118, 0.3)';
+    roundRect(ctx, x + 4, y + h - 5, (w - 8) * fill, 3, 2);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
@@ -1186,6 +1257,109 @@ function drawHomeScreen(){
 
   ctx.fillStyle='#78909c'; ctx.font='11px Georgia,serif'; ctx.textBaseline='alphabetic';
   ctx.fillText('Slapjam AI Jam Entry • Built with HTML5 Canvas',360,885);
+}
+
+// Role selection for 1v1 local
+function drawRoleSelectScreen(){
+  ctx.fillStyle='rgba(6,9,14,0.94)'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#141e2b'; roundRect(ctx,50,180,620,860,16); ctx.fill();
+  ctx.strokeStyle='#d4af37'; ctx.lineWidth=3; ctx.stroke();
+  ctx.fillStyle='#ffd875'; ctx.font='900 36px Georgia,serif'; ctx.textAlign='center';
+  ctx.fillText('CHOOSE YOUR ROLE',360,250);
+  ctx.fillStyle='#a0b3c6'; ctx.font='15px Georgia,serif'; ctx.fillText('1v1 Duel on Same Phone',360,285);
+
+  // Attacker
+  ctx.fillStyle='#2a0f0f'; roundRect(ctx,80,320,560,220,14); ctx.fill();
+  ctx.strokeStyle='#ff5252'; ctx.lineWidth=3; ctx.stroke();
+  ctx.fillStyle='#ff5252'; ctx.font='900 24px Georgia,serif'; ctx.fillText('🗡️ WARLORD (ATTACKER)',360,370);
+  ctx.fillStyle='#ffcdd2'; ctx.font='14px Georgia,serif';
+  ctx.fillText('Launches catapults, fire arrows, siege towers & assassin.',360,410);
+  ctx.fillText('Controls the TOP command bar — destroy the keep!',360,435);
+  ctx.fillStyle='#ff8a80'; ctx.font='bold 14px Georgia,serif'; ctx.fillText('TAP HERE TO PLAY AS ATTACKER →',360,490);
+
+  // Defender
+  ctx.fillStyle='#0a1f2a'; roundRect(ctx,80,570,560,220,14); ctx.fill();
+  ctx.strokeStyle='#00e676'; ctx.lineWidth=3; ctx.stroke();
+  ctx.fillStyle='#00e676'; ctx.font='900 24px Georgia,serif'; ctx.fillText('🛡️ MEDIC (DEFENDER)',360,620);
+  ctx.fillStyle='#c8e6c9'; ctx.font='14px Georgia,serif';
+  ctx.fillText('Runs the infirmary — triage knights & cast emergency powers.',360,660);
+  ctx.fillText('Controls the BOTTOM area — survive the siege!',360,685);
+  ctx.fillStyle='#69f0ae'; ctx.font='bold 14px Georgia,serif'; ctx.fillText('TAP HERE TO PLAY AS DEFENDER →',360,740);
+
+  ctx.fillStyle='#546e7a'; roundRect(ctx,200,830,320,52,10); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font='bold 16px Georgia,serif'; ctx.textBaseline='middle'; ctx.fillText('← BACK TO HOME',360,856);
+}
+
+// Online lobby screen (PeerJS WebRTC)
+function drawOnlineScreen(){
+  ctx.fillStyle='rgba(6,9,14,0.95)'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#141e2b'; roundRect(ctx,40,140,640,940,16); ctx.fill();
+  ctx.strokeStyle='#00e676'; ctx.lineWidth=3; ctx.stroke();
+  ctx.fillStyle='#69f0ae'; ctx.font='900 32px Georgia,serif'; ctx.textAlign='center';
+  ctx.fillText('🌐 ONLINE MULTIPLAYER',360,200);
+  ctx.fillStyle='#a0b3c6'; ctx.font='14px Georgia,serif'; ctx.fillText('Cross-Phone WebRTC P2P • No server needed',360,230);
+
+  // HOST section
+  ctx.fillStyle='#0a1f2a'; roundRect(ctx,65,260,590,200,14); ctx.fill();
+  ctx.strokeStyle='#00e676'; ctx.lineWidth=2; ctx.stroke();
+  ctx.fillStyle='#69f0ae'; ctx.font='900 20px Georgia,serif'; ctx.fillText('🏰 HOST GAME (DEFENDER)',360,300);
+  ctx.fillStyle='#cfd8dc'; ctx.font='13px Georgia,serif'; ctx.fillText('Run the infirmary. Give this room code to opponent:',360,330);
+  if(onlineState==='hosting'||onlineState==='connected'){
+    ctx.fillStyle='#0d1520'; roundRect(ctx,180,350,360,56,10); ctx.fill();
+    ctx.strokeStyle='#ffd875'; ctx.lineWidth=2; ctx.stroke();
+    ctx.fillStyle='#ffd875'; ctx.font='900 32px Georgia,serif'; ctx.fillText(roomCode||'CONNECTING...',360,390);
+    ctx.fillStyle='#69f0ae'; ctx.font='bold 13px Georgia,serif'; ctx.fillText('Waiting for attacker to connect...',360,435);
+  } else {
+    ctx.fillStyle='#00e676'; roundRect(ctx,180,350,360,56,12); ctx.fill();
+    ctx.fillStyle='#06090e'; ctx.font='900 20px Georgia,serif'; ctx.textBaseline='middle'; ctx.fillText('TAP TO CREATE ROOM',360,378);
+  }
+
+  // JOIN section
+  ctx.fillStyle='#1a1a0a'; roundRect(ctx,65,485,590,230,14); ctx.fill();
+  ctx.strokeStyle='#ffd875'; ctx.lineWidth=2; ctx.stroke();
+  ctx.fillStyle='#ffd875'; ctx.font='900 20px Georgia,serif'; ctx.textBaseline='alphabetic'; ctx.fillText('⚔️ JOIN GAME (ATTACKER)',360,525);
+  ctx.fillStyle='#cfd8dc'; ctx.font='13px Georgia,serif'; ctx.fillText('Launch the siege engines. Enter host room code:',360,552);
+  
+  // Code input box
+  ctx.fillStyle='#0d1520'; roundRect(ctx,160,565,400,48,10); ctx.fill();
+  ctx.strokeStyle=roomCodeInputActive?'#ffd875':'#546e7a'; ctx.lineWidth=2; ctx.stroke();
+  ctx.fillStyle=roomCodeInput?'#ffffff':'#78909c'; ctx.font='900 24px Georgia,serif'; ctx.textBaseline='middle';
+  ctx.fillText(roomCodeInput||'TAP TO ENTER CODE',360,589);
+
+  // Join button
+  ctx.fillStyle='#ff9800'; roundRect(ctx,180,630,360,50,12); ctx.fill();
+  ctx.fillStyle='#06090e'; ctx.font='900 20px Georgia,serif'; ctx.fillText('JOIN BATTLE',360,655);
+
+  // Status box
+  if(onlineStatus){
+    ctx.fillStyle='#0d1520'; roundRect(ctx,65,735,590,80,10); ctx.fill();
+    ctx.strokeStyle='#37474f'; ctx.lineWidth=1; ctx.stroke();
+    ctx.fillStyle='#69f0ae'; ctx.font='13px Georgia,serif'; ctx.textBaseline='alphabetic';
+    onlineStatus.split('\n').forEach((line,i)=>ctx.fillText(line,360,765+i*22));
+  }
+
+  // Virtual keyboard for room code
+  if(roomCodeInputActive){
+    drawVirtualKeyboard();
+  }
+
+  ctx.fillStyle='#546e7a'; roundRect(ctx,200,845,320,50,10); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font='bold 16px Georgia,serif'; ctx.textBaseline='middle'; ctx.fillText('← BACK TO HOME',360,870);
+}
+
+const KB_CHARS = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','0','1','2','3','4','5','6','7','8','9','-','⌫'];
+function drawVirtualKeyboard(){
+  ctx.fillStyle='rgba(6,9,14,0.97)'; ctx.fillRect(0,800,W,H-800);
+  const cols=10, rows=Math.ceil(KB_CHARS.length/cols);
+  KB_CHARS.forEach((c,i)=>{
+    const col=i%cols, row=Math.floor(i/cols);
+    const kx=14+col*(W-28)/cols, ky=810+row*56;
+    const kw=(W-28)/cols-3;
+    ctx.fillStyle='#1c2838'; roundRect(ctx,kx,ky,kw,48,6); ctx.fill();
+    ctx.strokeStyle='#d4af37'; ctx.lineWidth=1; ctx.stroke();
+    ctx.fillStyle='#ffd875'; ctx.font='bold 17px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(c,kx+kw/2,ky+24);
+  });
 }
 
 function drawHowToPlayScreen(){
@@ -1351,41 +1525,43 @@ canvas.addEventListener('pointerdown', e=>{
 
   // ROLE SELECT
   if(gameState==='roleselect'){
-    if(pt.x>90&&pt.x<630&&pt.y>420&&pt.y<620){ playerRole='attacker'; startGame('vs'); return; }
-    if(pt.x>90&&pt.x<630&&pt.y>640&&pt.y<860){ playerRole='defender'; startGame('vs'); return; }
-    if(pt.x>220&&pt.x<540&&pt.y>885&&pt.y<935){ gameState='home'; return; }
+    if(pt.x>80&&pt.x<640&&pt.y>320&&pt.y<540){ playerRole='attacker'; startGame('vs'); return; }
+    if(pt.x>80&&pt.x<640&&pt.y>570&&pt.y<790){ playerRole='defender'; startGame('vs'); return; }
+    if(pt.x>200&&pt.x<520&&pt.y>830&&pt.y<890){ gameState='home'; return; }
     return;
   }
 
   // ONLINE SCREEN
   if(gameState==='online'){
     // HOST
-    if(onlineState==='idle'&&pt.x>180&&pt.x<580&&pt.y>445&&pt.y<505){ onlineRole='defender'; playerRole='defender'; initPeer(); return; }
-    // Join code input
-    if(pt.x>160&&pt.x<560&&pt.y>668&&pt.y<716){ roomCodeInputActive=true; return; }
+    if((onlineState==='idle'||onlineState==='error')&&pt.x>180&&pt.x<540&&pt.y>350&&pt.y<410){
+      onlineRole='defender'; playerRole='defender'; initPeer(); return;
+    }
+    // Join code input tap
+    if(pt.x>160&&pt.x<560&&pt.y>565&&pt.y<615){ roomCodeInputActive=true; return; }
     // Virtual keyboard
-    if(roomCodeInputActive){
-      const cols=9;
+    if(roomCodeInputActive&&pt.y>=800){
+      const cols=10;
       for(let i=0;i<KB_CHARS.length;i++){
         const col=i%cols, row=Math.floor(i/cols);
-        const kx=18+col*(W-36)/cols, ky=840+row*58;
-        const kw=(W-36)/cols-4;
-        if(pt.x>kx&&pt.x<kx+kw&&pt.y>ky&&pt.y<ky+50){
+        const kx=14+col*(W-28)/cols, ky=810+row*56;
+        const kw=(W-28)/cols-3;
+        if(pt.x>kx&&pt.x<kx+kw&&pt.y>ky&&pt.y<ky+48){
           const c=KB_CHARS[i];
           if(c==='⌫') roomCodeInput=roomCodeInput.slice(0,-1);
-          else if(roomCodeInput.length<6) roomCodeInput+=c;
+          else if(roomCodeInput.length<10) roomCodeInput+=c;
           playTone(520,'sine',0.05,0.08); return;
         }
       }
       roomCodeInputActive=false; return;
     }
     // JOIN button
-    if(pt.x>180&&pt.x<540&&pt.y>730&&pt.y<782){
-      if(roomCodeInput.length>=4){ onlineRole='attacker'; playerRole='attacker'; joinPeer(roomCodeInput); }
-      else { onlineStatus='Enter a valid room code first!'; }
+    if(pt.x>180&&pt.x<540&&pt.y>630&&pt.y<685){
+      if(roomCodeInput.length>=3){ onlineRole='attacker'; playerRole='attacker'; joinPeer(roomCodeInput); }
+      else { onlineStatus='Enter the host\'s room code first!'; }
       return;
     }
-    if(pt.x>220&&pt.x<500&&pt.y>1020&&pt.y<1070){ gameState='home'; if(peer){try{peer.destroy();}catch(e){}} peer=null; conn=null; onlineState='idle'; return; }
+    if(pt.x>200&&pt.x<520&&pt.y>845&&pt.y<900){ gameState='home'; if(peer){try{peer.destroy();}catch(e){}} peer=null; conn=null; onlineState='idle'; return; }
     return;
   }
 
@@ -1432,10 +1608,12 @@ canvas.addEventListener('pointerdown', e=>{
   // Defender skills (only if not attacker in online)
   const isDefender=(gameMode!=='online')||(playerRole==='defender');
   if(isDefender){
-    if(pt.x>18&&pt.x<114&&pt.y>600&&pt.y<644){ activateElixir(); return; }
-    if(pt.x>122&&pt.x<218&&pt.y>600&&pt.y<644){ activateShield(); return; }
-    if(pt.x>226&&pt.x<322&&pt.y>600&&pt.y<644){ activateRally(); return; }
-    if(pt.x>330&&pt.x<426&&pt.y>600&&pt.y<644){ activateFortress(); return; }
+    if(pt.y >= 490 && pt.y <= 565){
+      if(pt.x >= 30 && pt.x <= 190){ activateElixir(); return; }
+      if(pt.x >= 192 && pt.x <= 354){ activateShield(); return; }
+      if(pt.x >= 356 && pt.x <= 516){ activateRally(); return; }
+      if(pt.x >= 518 && pt.x <= 678){ activateFortress(); return; }
+    }
 
     // Tap bed
     for(let bed of beds){
@@ -1452,7 +1630,7 @@ canvas.addEventListener('pointerdown', e=>{
           return;
         }
         if(bed.patient&&!assassinActive){
-          bed.isHealing=true; bed.treatProgress+=0.38*perks.healMult; vibrate(15);
+          bed.isHealing=true; bed.treatProgress+=0.32*perks.healMult; vibrate(15);
           playTone(480+bed.idx*120,'triangle',0.1,0.08);
           // Purse tap on cursed knight gives immediate purification progress
           if(bed.patient&&!bed.patient.isPurified){ bed.patient.isPurified=true; createParticles(bed.x,bed.y,'#b388ff',15); addFloatingText(bed.x,bed.y-40,'✨ PURIFIED!','#b388ff',20); }
