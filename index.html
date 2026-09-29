@@ -249,9 +249,16 @@ for (let i=0;i<45;i++) siegeEmbers.push({ x:Math.random()*W, y:Math.random()*H, 
 for (let i=0;i<60;i++) stormRain.push({ x:Math.random()*W, y:Math.random()*H, speed:550+Math.random()*300, len:12+Math.random()*10 });
 
 // ─────────────────────────────────────────────────────────────
-// ONLINE MULTIPLAYER (Instant Zero-Backend MQTT WebSockets)
+// ONLINE MULTIPLAYER (MQTT relays + parallel WebRTC direct-link backup)
 // ─────────────────────────────────────────────────────────────
 let mqttClient = null;
+let peerClient = null;
+let peerDataConnection = null;
+let peerFallbackTimer = null;
+let peerFallbackId = 0;
+let peerScriptPromise = null;
+let peerRoomCode = '';
+let peerRoomHost = null;
 let onlineState = 'idle'; // idle | hosting | joining | connected | error
 let roomCode = '';
 let onlineRole = 'defender'; // defender (host) | attacker (guest)
@@ -285,13 +292,166 @@ function generateRoomCode() {
 
 function disconnectMQTT() {
   mqttAttemptId++;
+  peerFallbackId++;
   if (relayAttemptTimer) { clearTimeout(relayAttemptTimer); relayAttemptTimer = null; }
+  if (peerFallbackTimer) { clearTimeout(peerFallbackTimer); peerFallbackTimer = null; }
   if (beaconInterval) { clearInterval(beaconInterval); beaconInterval = null; }
   if (handshakeTimer) { clearTimeout(handshakeTimer); handshakeTimer = null; }
   if (mqttClient) {
     try { mqttClient.disconnect(); } catch(e){}
     mqttClient = null;
   }
+  if (peerDataConnection) {
+    try { peerDataConnection.close(); } catch(e){}
+    peerDataConnection = null;
+  }
+  if (peerClient) {
+    try { peerClient.destroy(); } catch(e){}
+    peerClient = null;
+  }
+  peerRoomCode = '';
+  peerRoomHost = null;
+}
+
+function loadPeerJS() {
+  if (typeof Peer !== 'undefined') return Promise.resolve();
+  if (peerScriptPromise) return peerScriptPromise;
+  peerScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js';
+    script.onload = () => {
+      if (typeof Peer !== 'undefined') resolve();
+      else { peerScriptPromise = null; reject(new Error('PeerJS did not load')); }
+    };
+    script.onerror = () => { peerScriptPromise = null; reject(new Error('Could not load direct connection client')); };
+    document.head.appendChild(script);
+  });
+  return peerScriptPromise;
+}
+
+function connectPeerFallback(code, isHost, background = false) {
+  if (peerClient && peerRoomCode === code && peerRoomHost === isHost) {
+    if (!background && !(mqttClient && mqttClient.isConnected())) {
+      onlineStatus = 'Public relays timed out. Waiting for the direct phone link...';
+    }
+    return;
+  }
+  const attempt = ++peerFallbackId;
+  const remoteId = 'siege-rounds-' + code.toLowerCase();
+  let connected = false;
+  peerRoomCode = code;
+  peerRoomHost = isHost;
+  if (!background) {
+    onlineState = isHost ? 'hosting' : 'joining';
+    onlineStatus = 'Public relays timed out. Trying a direct phone connection...';
+  }
+
+  const fail = (reason) => {
+    if (attempt !== peerFallbackId || connected) return;
+    if (peerFallbackTimer) { clearTimeout(peerFallbackTimer); peerFallbackTimer = null; }
+    const detail = String(reason || 'direct connection unavailable').replace(/\s+/g, ' ').slice(0, 80);
+    if (background) {
+      if (mqttRelayFailures.length >= MQTT_BROKERS.length && !(mqttClient && mqttClient.isConnected())) {
+        onlineStatus = `All relays timed out; direct link failed (${detail}). Try both phones on the same Wi-Fi or use Offline Local Duel.`;
+        onlineState = 'error';
+      }
+      if (peerClient) { try { peerClient.destroy(); } catch(e){} }
+      peerClient = null;
+      peerRoomCode = '';
+      peerRoomHost = null;
+      return;
+    }
+    onlineStatus = `Online relays timed out and direct connection failed (${detail}). Try the same Wi-Fi or Offline Local Duel.`;
+    onlineState = 'error';
+  };
+
+  const acceptConnection = (connection) => {
+    if (attempt !== peerFallbackId || (peerDataConnection && peerDataConnection.open)) {
+      try { connection.close(); } catch(e){}
+      return;
+    }
+    peerDataConnection = connection;
+    let connectionWasOpen = false;
+    connection.on('open', () => {
+      if (attempt !== peerFallbackId) return;
+      connectionWasOpen = true;
+      connected = true;
+      if (peerFallbackTimer) { clearTimeout(peerFallbackTimer); peerFallbackTimer = null; }
+      if (isHost) {
+        if (!background && !(mqttClient && mqttClient.isConnected())) onlineStatus = '✅ DIRECT ROOM LIVE: ' + code + '\nWaiting for opponent to connect...';
+        startHostBeacon(code);
+      } else {
+        if (!background && !(mqttClient && mqttClient.isConnected())) onlineStatus = '⚡ Direct link ready. Challenging Host in Room ' + code + '...';
+        startGuestJoin(code);
+      }
+    });
+    connection.on('data', (data) => {
+      if (data && data.senderId !== currentClientId) handleOnlineMessage(data, isHost);
+    });
+    connection.on('error', (err) => {
+      if (!isHost && err && err.type === 'peer-unavailable') return;
+      fail(err && (err.type || err.message));
+    });
+    connection.on('close', () => {
+      if (connectionWasOpen && attempt === peerFallbackId && onlineState !== 'idle') {
+        onlineStatus = 'Direct phone connection closed. Return to the menu and reconnect.';
+        onlineState = 'error';
+      }
+    });
+  };
+
+  let dialAttempts = 0;
+  const dialHost = () => {
+    if (attempt !== peerFallbackId || isHost || !peerClient || peerClient.destroyed || (peerDataConnection && peerDataConnection.open)) return;
+    if (peerDataConnection) { try { peerDataConnection.close(); } catch(e){} }
+    peerDataConnection = null;
+    acceptConnection(peerClient.connect(remoteId, { serialization:'json', reliable:true }));
+    if (++dialAttempts < 16) setTimeout(dialHost, 1800);
+  };
+
+  if (!isHost) peerFallbackTimer = setTimeout(() => fail('signalling or WebRTC timed out'), 35000);
+  loadPeerJS().then(() => {
+    if (attempt !== peerFallbackId) return;
+    const options = { host:'0.peerjs.com', port:443, path:'/', secure:true, debug:0 };
+    peerClient = isHost ? new Peer(remoteId, options) : new Peer(undefined, options);
+    peerClient.on('open', (id) => {
+      if (attempt !== peerFallbackId) return;
+      if (isHost) {
+        if (!background && !(mqttClient && mqttClient.isConnected())) onlineStatus = '✅ DIRECT ROOM LIVE: ' + code + '\nWaiting for opponent to connect...';
+      } else {
+        dialHost();
+      }
+    });
+    if (isHost) peerClient.on('connection', acceptConnection);
+    peerClient.on('error', (err) => {
+      if (!isHost && err && err.type === 'peer-unavailable') return;
+      fail(err && (err.type || err.message));
+    });
+  }).catch((err) => fail(err.message));
+}
+
+function startHostBeacon(code) {
+  if (beaconInterval) clearInterval(beaconInterval);
+  beaconInterval = setInterval(() => {
+    if (onlineState === 'connected') { clearInterval(beaconInterval); beaconInterval = null; return; }
+    sendOnlineData({ type:'host_beacon', code });
+  }, 500);
+}
+
+function startGuestJoin(code) {
+  if (beaconInterval) clearInterval(beaconInterval);
+  beaconInterval = setInterval(() => {
+    if (onlineState === 'connected') { clearInterval(beaconInterval); beaconInterval = null; return; }
+    sendOnlineData({ type:'join_req', code });
+  }, 350);
+  if (handshakeTimer) clearTimeout(handshakeTimer);
+  handshakeTimer = setTimeout(() => {
+    if (onlineState === 'joining') {
+      if (beaconInterval) { clearInterval(beaconInterval); beaconInterval = null; }
+      onlineStatus = 'No host answered. Check the code and keep the host room open.';
+      onlineState = 'error';
+    }
+  }, 20000);
 }
 
 function initHostRoom() {
@@ -299,11 +459,13 @@ function initHostRoom() {
   brokerAttempt = 0;
   mqttRelayFailures = [];
   roomCode = generateRoomCode();
+  currentClientId = 'sr_host_' + Math.random().toString(36).substring(2, 9);
   onlineState = 'hosting';
   onlineRole = 'defender';
   playerRole = 'defender';
   onlineStatus = '✅ ROOM CREATED: ' + roomCode + '\nWaiting for opponent to connect...';
   connectMQTTRoom(roomCode, true);
+  connectPeerFallback(roomCode, true, true);
 }
 
 function joinHostRoom(code) {
@@ -316,17 +478,18 @@ function joinHostRoom(code) {
   brokerAttempt = 0;
   mqttRelayFailures = [];
   roomCode = clean;
+  currentClientId = 'sr_guest_' + Math.random().toString(36).substring(2, 9);
   onlineState = 'joining';
   onlineRole = 'attacker';
   playerRole = 'attacker';
   onlineStatus = 'Connecting to Room ' + roomCode + '...';
   connectMQTTRoom(roomCode, false);
+  connectPeerFallback(roomCode, false, true);
 }
 
 function connectMQTTRoom(code, isHost, brokerIdx = 0) {
   if (typeof Paho === 'undefined' || !Paho.MQTT || !Paho.MQTT.Client) {
-    onlineStatus = '⚠️ Network engine loading...\nPlease check internet and try again!';
-    onlineState = 'error';
+    connectPeerFallback(code, isHost);
     return;
   }
 
@@ -335,7 +498,6 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
   const attemptId = ++mqttAttemptId;
   const broker = MQTT_BROKERS[brokerIdx];
 
-  currentClientId = 'sr_' + (isHost ? 'host_' : 'guest_') + Math.random().toString(36).substring(2, 9);
   const topic = 'sr_jam2026_room_' + code;
 
   let brokerConnected = false;
@@ -358,14 +520,7 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
         if (attemptId === mqttAttemptId) connectMQTTRoom(code, isHost, brokerIdx + 1);
       }, 250);
     } else {
-      let detail = reason ? String(reason).replace(/\s+/g, ' ').slice(0, 90) : 'network did not accept the connection';
-      if (/socket|websocket/i.test(detail)) detail = 'secure WebSocket was blocked or closed by the network';
-      else if (/timed? ?out|timeout/i.test(detail)) detail = 'connection timed out';
-      else if (/certificate|ssl|tls/i.test(detail)) detail = 'secure connection certificate was rejected';
-      onlineStatus = IS_IOS
-        ? `iPhone relay connection failed. ${mqttRelayFailures.join(' • ')}\nLast error: ${detail}. Open the game in Safari, try Wi-Fi/cellular, and turn off VPN or iCloud Private Relay.`
-        : `Can't reach an online relay from this phone.\nTried: ${mqttRelayFailures.join(', ')}. Last error: ${detail}.\nTry Wi-Fi, turn off VPN/data saver, and use the HTTPS game page.`;
-      onlineState = 'error';
+      connectPeerFallback(code, isHost);
     }
   };
   try {
@@ -400,12 +555,12 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
     // invoking Paho's timeout callback. Force failover so the relay list advances.
     relayAttemptTimer = setTimeout(() => {
       startBackup('connection timed out on this network');
-    }, IS_IOS ? 25000 : 9000);
+    }, 8000);
     // Make MQTT 3.1.1 explicit so mobile Safari/Paho never has to infer the
     // protocol version while creating the secure WebSocket connection.
     const connectOptions = {
       useSSL: true,
-      timeout: IS_IOS ? 24 : 10,
+      timeout: 7,
       keepAliveInterval: 30,
       cleanSession: true,
       mqttVersion: 4,
@@ -426,25 +581,10 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
 
         if (isHost) {
         onlineStatus = '✅ ROOM LIVE: ' + code + '\nWaiting for opponent to connect...';
-          // Send periodic host beacon
-          beaconInterval = setInterval(() => {
-            if (onlineState === 'connected') { clearInterval(beaconInterval); return; }
-            sendOnlineData({ type: 'host_beacon', code });
-          }, 500);
+          startHostBeacon(code);
         } else {
           onlineStatus = '⚡ Connected! Challenging Host in Room ' + code + '...';
-          // Send periodic join request until acknowledged
-          beaconInterval = setInterval(() => {
-            if (onlineState === 'connected') { clearInterval(beaconInterval); return; }
-            sendOnlineData({ type: 'join_req', code });
-          }, 350);
-          handshakeTimer = setTimeout(() => {
-            if (onlineState === 'joining') {
-              if (beaconInterval) { clearInterval(beaconInterval); beaconInterval = null; }
-              onlineStatus = 'No host answered. Check the code, keep the host room open, then retry.';
-              onlineState = 'error';
-            }
-          }, 20000);
+          startGuestJoin(code);
         }
       },
       onFailure: (err) => {
@@ -465,16 +605,21 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
 }
 
 function sendOnlineData(data) {
-  if (!mqttClient || !mqttClient.isConnected() || !roomCode) return;
-  try {
-    const topic = 'sr_jam2026_room_' + roomCode;
-    data.senderId = currentClientId;
-    data.room = roomCode;
-    const msg = new Paho.MQTT.Message(JSON.stringify(data));
-    msg.destinationName = topic;
-    msg.qos = 0;
-    mqttClient.send(msg);
-  } catch(e){}
+  if (!roomCode) return;
+  const payload = Object.assign({}, data, { senderId:currentClientId, room:roomCode });
+  if (mqttClient) {
+    try {
+      if (mqttClient.isConnected()) {
+        const msg = new Paho.MQTT.Message(JSON.stringify(payload));
+        msg.destinationName = 'sr_jam2026_room_' + roomCode;
+        msg.qos = 0;
+        mqttClient.send(msg);
+      }
+    } catch(e){}
+  }
+  if (peerDataConnection && peerDataConnection.open) {
+    try { peerDataConnection.send(payload); } catch(e){}
+  }
 }
 
 function handleOnlineMessage(data, isHost) {
@@ -1725,7 +1870,7 @@ function drawOnlineScreen(){
   ctx.fillStyle='#69f0ae'; ctx.font='900 32px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
   ctx.fillText('🌐 ONLINE 1v1 DUEL',360,165);
   ctx.fillStyle=IS_IOS?'#ffd875':'#a0b3c6'; ctx.font=IS_IOS?'bold 14px Georgia,serif':'14px Georgia,serif';
-  ctx.fillText(IS_IOS?'iOS compatibility mode • secure relay attempts may take up to 25s':'Cross-phone battle through a public MQTT relay',360,195);
+  ctx.fillText(IS_IOS?'iOS relay + direct-link fallback':'Public relay + direct-link backup',360,195);
 
   // ═══════════════════════════════════════════════════════════
   // 1. HOST SECTION (Defender / Medic)

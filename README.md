@@ -47,7 +47,7 @@ and tools used to the project description. See the
 - **Reinforce the Battlements**: When fully healed, knights celebrate and rush to the castle ramparts, restoring wall integrity and standing guard against catapults.
 - **Relic Forge**: Between waves, forge one of 6 Keep Relics (Royal Field Salve, Granite Bastion, Herbal Tincture, Apothecary Order, Rallying Horn, War Treasury).
 - **Offline Local Duel**: Both players share one phone in portrait. The attacker taps siege weapons in the top half; the defender drags knights to beds and taps to heal in the bottom half. The split controls support simultaneous touch.
-- **Online Duel**: Create or join a room to play attacker versus defender over the internet. Phone-friendly secure WebSocket relay is tried first; both players need an internet connection for online play.
+- **Online Duel**: Create or join a room to play attacker versus defender over the internet. Secure WebSocket relays and a direct WebRTC data-channel backup are started together, so the phones can use whichever path connects. Both players need an internet connection; direct play uses PeerJS Cloud for signaling and WebRTC for game data.
 
 ---
 
@@ -59,6 +59,6 @@ and tools used to the project description. See the
 - **AI Tools Used**: Google Antigravity, Gemini (as used by the creator), and OpenAI Codex.
 - **Technical Specs**:
   - Pure HTML5 + Canvas 2D + WebAudio synthesis.
-  - No external npm packages. Online multiplayer loads the Paho MQTT browser client from cdnjs; offline/local modes need no relay connection.
+  - No build step or npm packages. Online play loads Paho MQTT from cdnjs and PeerJS on demand from jsDelivr; offline/local modes need neither service.
   - Offline-ready with PWA Service Worker caching.
   - Package size: < 1 MB (well under the 15 MB limit).
