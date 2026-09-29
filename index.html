@@ -266,6 +266,7 @@ let brokerAttempt = 0;
 let handshakeTimer = null;
 let mqttAttemptId = 0;
 let mqttRelayFailures = [];
+let relayAttemptTimer = null;
 const MQTT_BROKERS = [
   // Port 443 works on phone networks that block less common WebSocket ports.
   { host:'demo.tbmq.io', port:443, path:'/mqtt', username:'demo' },
@@ -282,6 +283,7 @@ function generateRoomCode() {
 
 function disconnectMQTT() {
   mqttAttemptId++;
+  if (relayAttemptTimer) { clearTimeout(relayAttemptTimer); relayAttemptTimer = null; }
   if (beaconInterval) { clearInterval(beaconInterval); beaconInterval = null; }
   if (handshakeTimer) { clearTimeout(handshakeTimer); handshakeTimer = null; }
   if (mqttClient) {
@@ -338,6 +340,8 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
   const startBackup = (reason) => {
     if (attemptId !== mqttAttemptId || backupStarted) return;
     backupStarted = true;
+    if (relayAttemptTimer) { clearTimeout(relayAttemptTimer); relayAttemptTimer = null; }
+    if (mqttClient) { try { mqttClient.disconnect(); } catch(e){} }
     mqttRelayFailures.push(`${broker.host}:${broker.port}`);
     if (brokerIdx + 1 < MQTT_BROKERS.length) {
       const next = MQTT_BROKERS[brokerIdx + 1];
@@ -383,6 +387,11 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
       } catch(e){}
     };
 
+    // Some mobile browsers/networks leave a WebSocket handshake pending without
+    // invoking Paho's timeout callback. Force failover so the relay list advances.
+    relayAttemptTimer = setTimeout(() => {
+      startBackup('connection timed out on this network');
+    }, 9000);
     mqttClient.connect({
       useSSL: true,
       ...(broker.username ? { userName:broker.username } : {}),
@@ -391,6 +400,7 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
       cleanSession: true,
       onSuccess: () => {
         if (attemptId !== mqttAttemptId) return;
+        if (relayAttemptTimer) { clearTimeout(relayAttemptTimer); relayAttemptTimer = null; }
         brokerConnected = true;
         const connectedClient = mqttClient;
         connectedClient.subscribe(topic, {
