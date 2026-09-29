@@ -26,8 +26,8 @@
   <canvas id="c" width="720" height="1280"></canvas>
 </div>
 
-<!-- PeerJS for online multiplayer (cross-phone P2P, no backend needed) -->
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<!-- Paho MQTT for zero-backend, instant cross-phone online multiplayer -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
 
 <script>
 (()=>{
@@ -245,158 +245,182 @@ for (let i=0;i<45;i++) siegeEmbers.push({ x:Math.random()*W, y:Math.random()*H, 
 for (let i=0;i<60;i++) stormRain.push({ x:Math.random()*W, y:Math.random()*H, speed:550+Math.random()*300, len:12+Math.random()*10 });
 
 // ─────────────────────────────────────────────────────────────
-// ONLINE MULTIPLAYER (PeerJS WebRTC)
+// ONLINE MULTIPLAYER (Instant Zero-Backend MQTT WebSockets)
 // ─────────────────────────────────────────────────────────────
-let peer = null, conn = null;
+let mqttClient = null;
 let onlineState = 'idle'; // idle | hosting | joining | connected | error
 let roomCode = '';
-let onlineRole = 'defender'; // local player's role in online game
-let roomCodeInput = ''; // typed room code (virtual)
+let onlineRole = 'defender'; // defender (host) | attacker (guest)
+let roomCodeInput = ''; // typed room code
 let roomCodeInputActive = false;
 let onlineStatus = '';
+let copyFeedback = '';
+let copyFeedbackTimer = 0;
 
-let peerTimeout = null;
+const MQTT_BROKERS = [
+  { host: 'broker.emqx.io', port: 8084, path: '/mqtt' },
+  { host: 'broker.hivemq.com', port: 8884, path: '/mqtt' },
+  { host: 'test.mosquitto.org', port: 8081, path: '/mqtt' }
+];
 
-function initPeer() {
-  if (typeof Peer === 'undefined') {
-    onlineStatus = '⚠️ PeerJS library not loaded.\nCheck internet connection & reload!';
-    onlineState = 'error';
-    return;
-  }
-  if (peer) { try{ peer.destroy(); }catch(e){} }
-  if (peerTimeout) clearTimeout(peerTimeout);
-
-  // Strictly alphanumeric ID (no dashes or symbols)
-  const id = 'SR' + Math.random().toString(36).substring(2,6).toUpperCase();
-  onlineStatus = 'Connecting to multiplayer server...';
-  onlineState = 'hosting';
-
-  const createPeerInstance = (peerId) => {
-    try {
-      const p = peerId ? new Peer(peerId, {
-        debug: 1,
-        config: {
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun.cloudflare.com:3478' }
-          ]
-        }
-      }) : new Peer({
-        debug: 1,
-        config: {
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun.cloudflare.com:3478' }
-          ]
-        }
-      });
-
-      p.on('open', pid => {
-        if (peerTimeout) clearTimeout(peerTimeout);
-        roomCode = pid.toUpperCase();
-        onlineStatus = '✅ ROOM CREATED: ' + roomCode + '\nWaiting for opponent to connect...';
-        onlineState = 'hosting';
-      });
-
-      p.on('connection', c => { setupConn(c); });
-
-      p.on('error', err => {
-        if (peerTimeout) clearTimeout(peerTimeout);
-        onlineStatus = 'Server notice: ' + (err.type || err.message || err) + '\nTap to Retry';
-        onlineState = 'error';
-      });
-
-      return p;
-    } catch (err) {
-      onlineStatus = 'Init error: ' + err.message;
-      onlineState = 'error';
-      return null;
-    }
-  };
-
-  peer = createPeerInstance(id);
-
-  // Fallback timeout: if custom ID takes > 5s, re-init with auto-assigned ID
-  peerTimeout = setTimeout(() => {
-    if (onlineState === 'hosting' && !roomCode && peer) {
-      try { peer.destroy(); } catch(e){}
-      onlineStatus = 'Using alternate cloud broker...';
-      peer = createPeerInstance(null);
-    }
-  }, 5000);
+function generateRoomCode() {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let code = '';
+  for (let i = 0; i < 4; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
+  return code;
 }
 
-function joinPeer(code) {
-  if (typeof Peer === 'undefined') {
-    onlineStatus = '⚠️ PeerJS library not loaded.\nCheck internet connection!';
+function disconnectMQTT() {
+  if (mqttClient) {
+    try { mqttClient.disconnect(); } catch(e){}
+    mqttClient = null;
+  }
+}
+
+function initHostRoom() {
+  disconnectMQTT();
+  roomCode = generateRoomCode();
+  onlineState = 'hosting';
+  onlineRole = 'defender';
+  playerRole = 'defender';
+  onlineStatus = '✅ ROOM CREATED: ' + roomCode + '\nWaiting for opponent to connect...';
+  connectMQTTRoom(roomCode, true, 0);
+}
+
+function joinHostRoom(code) {
+  const clean = (code || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  if (clean.length < 3) {
+    onlineStatus = 'Please enter a valid 4-character room code!';
+    return;
+  }
+  disconnectMQTT();
+  roomCode = clean;
+  onlineState = 'joining';
+  onlineRole = 'attacker';
+  playerRole = 'attacker';
+  onlineStatus = 'Connecting to Room ' + roomCode + '...';
+  connectMQTTRoom(roomCode, false, 0);
+}
+
+function connectMQTTRoom(code, isHost, brokerIdx = 0) {
+  if (typeof Paho === 'undefined' || !Paho.MQTT || !Paho.MQTT.Client) {
+    onlineStatus = '⚠️ Network engine loading...\nPlease check internet and try again!';
     onlineState = 'error';
     return;
   }
-  if (peer) { try{ peer.destroy(); }catch(e){} }
-  const cleanCode = code.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-  onlineStatus = 'Connecting to room ' + cleanCode + '...';
-  onlineState = 'joining';
+
+  const broker = MQTT_BROKERS[brokerIdx % MQTT_BROKERS.length];
+  const clientId = 'sr_' + (isHost ? 'h_' : 'g_') + Math.random().toString(36).substring(2, 9);
 
   try {
-    peer = new Peer({
-      debug: 1,
-      config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun.cloudflare.com:3478' }
-        ]
+    mqttClient = new Paho.MQTT.Client(broker.host, broker.port, broker.path, clientId);
+
+    mqttClient.onConnectionLost = (responseObject) => {
+      if (responseObject.errorCode !== 0) {
+        if (gameState === 'play' && gameMode === 'online') {
+          addFloatingText(360, 500, '⚠️ CONNECTION INTERRUPTED', '#ff5252', 24);
+        }
+      }
+    };
+
+    mqttClient.onMessageArrived = (message) => {
+      try {
+        const payload = JSON.parse(message.payloadString);
+        handleOnlineMessage(payload, message.destinationName, isHost);
+      } catch(e){}
+    };
+
+    mqttClient.connect({
+      useSSL: true,
+      timeout: 8,
+      keepAliveInterval: 30,
+      cleanSession: true,
+      onSuccess: () => {
+        const topic = 'sr2026/room/' + code + '/#';
+        mqttClient.subscribe(topic, { qos: 1 });
+
+        if (isHost) {
+          onlineStatus = '✅ ROOM LIVE: ' + code + '\nWaiting for opponent to connect...';
+        } else {
+          onlineStatus = '⚡ Connected to room! Challenging host...';
+          // Send join handshake repeatedly to guarantee instant connection
+          let attempts = 0;
+          const pingInterval = setInterval(() => {
+            if (onlineState === 'connected' || attempts >= 5) {
+              clearInterval(pingInterval);
+              return;
+            }
+            sendOnlineData({ type: 'join_req', code });
+            attempts++;
+          }, 300);
+        }
+      },
+      onFailure: (err) => {
+        if (brokerIdx < MQTT_BROKERS.length - 1) {
+          onlineStatus = 'Connecting via backup network (' + (brokerIdx + 2) + ')...';
+          connectMQTTRoom(code, isHost, brokerIdx + 1);
+        } else {
+          onlineStatus = 'Connection failed. Please check internet & retry.';
+          onlineState = 'error';
+        }
       }
     });
-    peer.on('open', () => {
-      const c = peer.connect(cleanCode, { reliable: true });
-      setupConn(c);
-      onlineStatus = 'Handshaking with ' + cleanCode + '...';
-    });
-    peer.on('error', err => {
-      onlineStatus = 'Join error: ' + (err.type || err.message || err);
-      onlineState = 'error';
-    });
-  } catch (err) {
-    onlineStatus = 'Join error: ' + err.message;
+  } catch(e) {
+    onlineStatus = 'Network error: ' + e.message;
     onlineState = 'error';
   }
-}
-
-function setupConn(c) {
-  conn = c;
-  conn.on('open', () => {
-    onlineState = 'connected';
-    onlineStatus = 'Connected! Starting game...';
-    // Host is defender, joiner is attacker
-    if (peer && roomCode && c.peer !== peer.id) {
-      onlineRole = 'attacker';
-    } else {
-      onlineRole = 'defender';
-    }
-    setTimeout(() => {
-      playerRole = onlineRole;
-      startGame('online');
-    }, 800);
-  });
-  conn.on('data', handleOnlineData);
-  conn.on('close', () => {
-    onlineStatus = 'Opponent disconnected!';
-    if (gameState === 'play') {
-      addFloatingText(360, 500, '📡 OPPONENT DISCONNECTED!', '#ff5252', 26);
-    }
-  });
 }
 
 function sendOnlineData(data) {
-  if (conn && conn.open) {
-    try { conn.send(data); } catch(e) {}
-  }
+  if (!mqttClient || !mqttClient.isConnected() || !roomCode) return;
+  try {
+    const sender = (onlineRole === 'defender') ? 'host' : 'guest';
+    const topic = 'sr2026/room/' + roomCode + '/' + sender;
+    const msg = new Paho.MQTT.Message(JSON.stringify(data));
+    msg.destinationName = topic;
+    msg.qos = 1;
+    mqttClient.send(msg);
+  } catch(e){}
 }
 
-function handleOnlineData(data) {
+function handleOnlineMessage(data, topic, isHost) {
   if (!data || !data.type) return;
+
+  // Prevent processing self-published messages
+  const mySender = isHost ? '/host' : '/guest';
+  if (topic && topic.endsWith(mySender)) return;
+
+  // Guest requested to join host room
+  if (data.type === 'join_req' && isHost) {
+    sendOnlineData({ type: 'join_ack', code: roomCode });
+    if (onlineState !== 'connected') {
+      onlineState = 'connected';
+      onlineStatus = '⚔️ ATTACKER CONNECTED!\nStarting duel...';
+      playTone(580, 'triangle', 0.2, 0.15, 880);
+      setTimeout(() => {
+        playerRole = 'defender';
+        startGame('online');
+      }, 800);
+    }
+    return;
+  }
+
+  // Host acknowledged guest request
+  if (data.type === 'join_ack' && !isHost) {
+    if (onlineState !== 'connected') {
+      onlineState = 'connected';
+      onlineStatus = '⚔️ HOST ACCEPTED!\nStarting duel...';
+      playTone(580, 'triangle', 0.2, 0.15, 880);
+      setTimeout(() => {
+        playerRole = 'attacker';
+        startGame('online');
+      }, 800);
+    }
+    return;
+  }
+
+  // Real-time In-game Action Sync
   if (data.type === 'skill') {
-    // Attacker fired a skill — apply on defender screen
     if (playerRole === 'defender') {
       triggerAttackerSkill(data.key, true);
     }
@@ -409,6 +433,55 @@ function handleOnlineData(data) {
     triggerVictory();
   }
 }
+
+function copyRoomCodeToClipboard() {
+  if (!roomCode) return;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(roomCode).then(() => {
+      copyFeedback = '✅ COPIED!';
+      setTimeout(() => { copyFeedback = ''; }, 2200);
+    }).catch(() => {
+      copyFeedback = 'CODE: ' + roomCode;
+    });
+  } else {
+    copyFeedback = 'CODE: ' + roomCode;
+  }
+  playTone(620, 'sine', 0.08, 0.08);
+}
+
+function pasteRoomCodeFromClipboard() {
+  if (navigator.clipboard && navigator.clipboard.readText) {
+    navigator.clipboard.readText().then(text => {
+      if (text) {
+        roomCodeInput = text.replace(/[^A-Za-z0-9]/g, '').slice(0, 6).toUpperCase();
+        playTone(520, 'sine', 0.05, 0.08);
+      }
+    }).catch(() => {});
+  }
+}
+
+window.addEventListener('keydown', (e) => {
+  if (gameState === 'online' && roomCodeInputActive) {
+    if (e.key === 'Backspace') {
+      roomCodeInput = roomCodeInput.slice(0, -1);
+      playTone(360, 'sine', 0.05, 0.06);
+      e.preventDefault();
+    } else if (e.key === 'Enter') {
+      roomCodeInputActive = false;
+      if (roomCodeInput.length >= 3) {
+        joinHostRoom(roomCodeInput);
+      }
+      e.preventDefault();
+    } else if (e.key === 'Escape') {
+      roomCodeInputActive = false;
+      e.preventDefault();
+    } else if (/^[a-zA-Z0-9]$/.test(e.key) && roomCodeInput.length < 6) {
+      roomCodeInput += e.key.toUpperCase();
+      playTone(520, 'sine', 0.05, 0.08);
+      e.preventDefault();
+    }
+  }
+});
 
 // ─────────────────────────────────────────────────────────────
 // GAME STATE MANAGEMENT
@@ -1323,61 +1396,110 @@ function drawRoleSelectScreen(){
   ctx.fillStyle='#fff'; ctx.font='bold 16px Georgia,serif'; ctx.textBaseline='middle'; ctx.fillText('← BACK TO HOME',360,856);
 }
 
-// Online lobby screen (PeerJS WebRTC)
+// Online lobby screen (Instant Cross-Phone MQTT 1v1)
 function drawOnlineScreen(){
-  ctx.fillStyle='rgba(6,9,14,0.95)'; ctx.fillRect(0,0,W,H);
-  ctx.fillStyle='#141e2b'; roundRect(ctx,40,140,640,940,16); ctx.fill();
+  ctx.fillStyle='rgba(6,9,14,0.96)'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#141e2b'; roundRect(ctx,35,110,650,960,16); ctx.fill();
   ctx.strokeStyle='#00e676'; ctx.lineWidth=3; ctx.stroke();
-  ctx.fillStyle='#69f0ae'; ctx.font='900 32px Georgia,serif'; ctx.textAlign='center';
-  ctx.fillText('🌐 ONLINE MULTIPLAYER',360,200);
-  ctx.fillStyle='#a0b3c6'; ctx.font='14px Georgia,serif'; ctx.fillText('Cross-Phone WebRTC P2P • No server needed',360,230);
 
-  // HOST section
-  ctx.fillStyle='#0a1f2a'; roundRect(ctx,65,260,590,200,14); ctx.fill();
+  // Title
+  ctx.fillStyle='#69f0ae'; ctx.font='900 32px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  ctx.fillText('🌐 ONLINE 1v1 DUEL',360,165);
+  ctx.fillStyle='#a0b3c6'; ctx.font='14px Georgia,serif';
+  ctx.fillText('Real-Time Cross-Phone Battle • No Server Setup Needed',360,195);
+
+  // ═══════════════════════════════════════════════════════════
+  // 1. HOST SECTION (Defender / Medic)
+  // ═══════════════════════════════════════════════════════════
+  ctx.fillStyle='#0a1f2a'; roundRect(ctx,55,220,610,230,14); ctx.fill();
   ctx.strokeStyle='#00e676'; ctx.lineWidth=2; ctx.stroke();
-  ctx.fillStyle='#69f0ae'; ctx.font='900 20px Georgia,serif'; ctx.fillText('🏰 HOST GAME (DEFENDER)',360,300);
-  ctx.fillStyle='#cfd8dc'; ctx.font='13px Georgia,serif'; ctx.fillText('Run the infirmary. Give this room code to opponent:',360,330);
-  if(onlineState==='hosting'||onlineState==='connected'){
-    ctx.fillStyle='#0d1520'; roundRect(ctx,180,350,360,56,10); ctx.fill();
+
+  ctx.fillStyle='#69f0ae'; ctx.font='900 20px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  ctx.fillText('🏰 OPTION A: HOST BATTLE (DEFENDER)',360,255);
+  ctx.fillStyle='#cfd8dc'; ctx.font='13px Georgia,serif';
+  ctx.fillText('Heal knights & hold the keep. Give this 4-letter code to your friend:',360,280);
+
+  if(onlineState==='hosting' || (onlineState==='connected' && onlineRole==='defender')){
+    // Room code display
+    ctx.fillStyle='#0d1520'; roundRect(ctx,160,295,400,52,10); ctx.fill();
     ctx.strokeStyle='#ffd875'; ctx.lineWidth=2; ctx.stroke();
-    ctx.fillStyle='#ffd875'; ctx.font='900 32px Georgia,serif'; ctx.fillText(roomCode||'CONNECTING...',360,390);
-    ctx.fillStyle='#69f0ae'; ctx.font='bold 13px Georgia,serif'; ctx.fillText('Waiting for attacker to connect...',360,435);
+    ctx.fillStyle='#ffd875'; ctx.font='900 32px Georgia,serif'; ctx.textBaseline='middle';
+    ctx.fillText(roomCode,360,320);
+
+    // Copy Code button
+    ctx.fillStyle='#1e3a29'; roundRect(ctx,160,360,190,44,8); ctx.fill();
+    ctx.strokeStyle='#00e676'; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.fillStyle='#69f0ae'; ctx.font='bold 14px Georgia,serif'; ctx.textBaseline='middle';
+    ctx.fillText(copyFeedback || '📋 COPY CODE',255,382);
+
+    // New Code button
+    ctx.fillStyle='#263546'; roundRect(ctx,370,360,190,44,8); ctx.fill();
+    ctx.strokeStyle='#78909c'; ctx.lineWidth=1; ctx.stroke();
+    ctx.fillStyle='#cfd8dc'; ctx.font='bold 13px Georgia,serif';
+    ctx.fillText('🔄 NEW CODE',465,382);
+
+    ctx.fillStyle='#69f0ae'; ctx.font='bold 13px Georgia,serif'; ctx.textBaseline='alphabetic';
+    ctx.fillText('📡 Room is active! Waiting for attacker to join...',360,432);
   } else {
-    ctx.fillStyle='#00e676'; roundRect(ctx,180,350,360,56,12); ctx.fill();
-    ctx.fillStyle='#06090e'; ctx.font='900 20px Georgia,serif'; ctx.textBaseline='middle'; ctx.fillText('TAP TO CREATE ROOM',360,378);
+    // Create Room Button
+    ctx.fillStyle='#00e676'; roundRect(ctx,140,305,440,56,12); ctx.fill();
+    ctx.fillStyle='#06090e'; ctx.font='900 20px Georgia,serif'; ctx.textBaseline='middle';
+    ctx.fillText('👑 CREATE BATTLE ROOM (HOST)',360,333);
+
+    ctx.fillStyle='#a5d6a7'; ctx.font='12px Georgia,serif'; ctx.textBaseline='alphabetic';
+    ctx.fillText('Instant room creation — opponent can connect immediately',360,395);
   }
 
-  // JOIN section
-  ctx.fillStyle='#1a1a0a'; roundRect(ctx,65,485,590,230,14); ctx.fill();
-  ctx.strokeStyle='#ffd875'; ctx.lineWidth=2; ctx.stroke();
-  ctx.fillStyle='#ffd875'; ctx.font='900 20px Georgia,serif'; ctx.textBaseline='alphabetic'; ctx.fillText('⚔️ JOIN GAME (ATTACKER)',360,525);
-  ctx.fillStyle='#cfd8dc'; ctx.font='13px Georgia,serif'; ctx.fillText('Launch the siege engines. Enter host room code:',360,552);
-  
+  // ═══════════════════════════════════════════════════════════
+  // 2. JOIN SECTION (Attacker / Warlord)
+  // ═══════════════════════════════════════════════════════════
+  ctx.fillStyle='#20150a'; roundRect(ctx,55,470,610,240,14); ctx.fill();
+  ctx.strokeStyle='#ff9800'; ctx.lineWidth=2; ctx.stroke();
+
+  ctx.fillStyle='#ffd875'; ctx.font='900 20px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  ctx.fillText('⚔️ OPTION B: JOIN BATTLE (ATTACKER)',360,505);
+  ctx.fillStyle='#cfd8dc'; ctx.font='13px Georgia,serif';
+  ctx.fillText('Command siege engines to breach the wall. Enter host code:',360,530);
+
   // Code input box
-  ctx.fillStyle='#0d1520'; roundRect(ctx,160,565,400,48,10); ctx.fill();
+  ctx.fillStyle='#0d1520'; roundRect(ctx,110,545,350,50,10); ctx.fill();
   ctx.strokeStyle=roomCodeInputActive?'#ffd875':'#546e7a'; ctx.lineWidth=2; ctx.stroke();
-  ctx.fillStyle=roomCodeInput?'#ffffff':'#78909c'; ctx.font='900 24px Georgia,serif'; ctx.textBaseline='middle';
-  ctx.fillText(roomCodeInput||'TAP TO ENTER CODE',360,589);
+  ctx.fillStyle=roomCodeInput?'#ffffff':'#78909c';
+  ctx.font=roomCodeInput?'900 26px Georgia,serif':'15px Georgia,serif';
+  ctx.textBaseline='middle';
+  ctx.fillText(roomCodeInput||'TAP TO ENTER CODE',285,570);
+
+  // Paste button
+  ctx.fillStyle='#37474f'; roundRect(ctx,475,545,135,50,10); ctx.fill();
+  ctx.strokeStyle='#78909c'; ctx.lineWidth=1; ctx.stroke();
+  ctx.fillStyle='#ffffff'; ctx.font='bold 14px Georgia,serif';
+  ctx.fillText('📋 PASTE',542,570);
 
   // Join button
-  ctx.fillStyle='#ff9800'; roundRect(ctx,180,630,360,50,12); ctx.fill();
-  ctx.fillStyle='#06090e'; ctx.font='900 20px Georgia,serif'; ctx.fillText('JOIN BATTLE',360,655);
+  ctx.fillStyle='#ff9800'; roundRect(ctx,140,615,440,52,12); ctx.fill();
+  ctx.fillStyle='#06090e'; ctx.font='900 20px Georgia,serif'; ctx.textBaseline='middle';
+  ctx.fillText('⚔️ JOIN BATTLE (ATTACK)',360,641);
+
+  ctx.fillStyle='#ffcc80'; ctx.font='12px Georgia,serif'; ctx.textBaseline='alphabetic';
+  ctx.fillText('Tap input box to type code or paste from clipboard',360,695);
 
   // Status box
   if(onlineStatus){
-    ctx.fillStyle='#0d1520'; roundRect(ctx,65,735,590,80,10); ctx.fill();
+    ctx.fillStyle='#0d1520'; roundRect(ctx,55,730,610,75,10); ctx.fill();
     ctx.strokeStyle='#37474f'; ctx.lineWidth=1; ctx.stroke();
-    ctx.fillStyle='#69f0ae'; ctx.font='13px Georgia,serif'; ctx.textBaseline='alphabetic';
-    onlineStatus.split('\n').forEach((line,i)=>ctx.fillText(line,360,765+i*22));
+    ctx.fillStyle='#69f0ae'; ctx.font='13px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+    onlineStatus.split('\n').forEach((line,i)=>ctx.fillText(line,360,758+i*22));
   }
 
-  // Virtual keyboard for room code
+  // Back button
+  ctx.fillStyle='#546e7a'; roundRect(ctx,200,830,320,50,10); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font='bold 16px Georgia,serif'; ctx.textBaseline='middle'; ctx.textAlign='center';
+  ctx.fillText('← BACK TO HOME',360,855);
+
+  // Virtual keyboard overlay
   if(roomCodeInputActive){
     drawVirtualKeyboard();
   }
-
-  ctx.fillStyle='#546e7a'; roundRect(ctx,200,845,320,50,10); ctx.fill();
-  ctx.fillStyle='#fff'; ctx.font='bold 16px Georgia,serif'; ctx.textBaseline='middle'; ctx.fillText('← BACK TO HOME',360,870);
 }
 
 const KB_ROWS = [
@@ -1389,37 +1511,44 @@ const KB_ROWS = [
 
 function drawVirtualKeyboard(){
   ctx.save();
-  ctx.fillStyle='rgba(6,9,14,0.98)'; ctx.fillRect(0,730,W,H-730);
-  ctx.strokeStyle='#d4af37'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(0,730); ctx.lineTo(W,730); ctx.stroke();
+  // Semi-transparent backdrop shadow
+  ctx.fillStyle='rgba(0,0,0,0.55)';
+  ctx.fillRect(0,0,W,710);
+
+  // Keyboard container
+  ctx.fillStyle='#0d1520';
+  ctx.fillRect(0,710,W,H-710);
+  ctx.strokeStyle='#d4af37'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(0,710); ctx.lineTo(W,710); ctx.stroke();
 
   // Top header bar / Dismiss button
-  ctx.fillStyle='#141e2b'; ctx.fillRect(0,730,W,50);
-  ctx.fillStyle='#ffd875'; ctx.font='bold 14px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='middle';
-  ctx.fillText(`⌨️ CODE: ${roomCodeInput || '____'}`, 24, 755);
+  ctx.fillStyle='#141e2b'; ctx.fillRect(0,710,W,55);
+  ctx.fillStyle='#ffd875'; ctx.font='bold 16px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='middle';
+  ctx.fillText(`⌨️ CODE:  ${roomCodeInput || '____'}`, 24, 737);
 
-  // Hide button on right
-  ctx.fillStyle='#37474f'; roundRect(ctx, 540, 738, 156, 34, 8); ctx.fill();
-  ctx.strokeStyle='#78909c'; ctx.lineWidth=1; ctx.stroke();
-  ctx.fillStyle='#ffffff'; ctx.font='bold 13px Georgia,serif'; ctx.textAlign='center';
-  ctx.fillText('▼ HIDE [✕]', 618, 755);
+  // Hide / Done button on right
+  ctx.fillStyle='#2e7d32'; roundRect(ctx, 510, 718, 185, 38, 8); ctx.fill();
+  ctx.strokeStyle='#69f0ae'; ctx.lineWidth=1; ctx.stroke();
+  ctx.fillStyle='#ffffff'; ctx.font='900 14px Georgia,serif'; ctx.textAlign='center';
+  ctx.fillText('▼ HIDE KEYBOARD [✕]', 602, 737);
 
   // 4 rows of keyboard keys
   KB_ROWS.forEach((row, rowIdx) => {
-    const rowY = 790 + rowIdx * 56;
+    const rowY = 775 + rowIdx * 56;
     const keyCount = row.length;
     const keyWidth = (W - 24 - (keyCount - 1) * 6) / keyCount;
     row.forEach((char, colIdx) => {
       const keyX = 12 + colIdx * (keyWidth + 6);
       const isSpecial = char === '⌫';
-      ctx.fillStyle = isSpecial ? '#263546' : '#1c2838';
+      ctx.fillStyle = isSpecial ? '#b71c1c' : '#1c2838';
       roundRect(ctx, keyX, rowY, keyWidth, 48, 6);
       ctx.fill();
-      ctx.strokeStyle = isSpecial ? '#ff7043' : '#d4af37';
+      ctx.strokeStyle = isSpecial ? '#ff5252' : '#d4af37';
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      ctx.fillStyle = isSpecial ? '#ff8a80' : '#ffd875';
-      ctx.font = 'bold 18px Georgia,serif';
+      ctx.fillStyle = isSpecial ? '#ffffff' : '#ffd875';
+      ctx.font = '900 18px Georgia,serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(char, keyX + keyWidth / 2, rowY + 24);
@@ -1599,37 +1728,63 @@ canvas.addEventListener('pointerdown', e=>{
 
   // ONLINE SCREEN
   if(gameState==='online'){
-    // If keyboard is open and user taps outside keyboard tray (above y=730)
-    if(roomCodeInputActive && pt.y < 730){
-      if(!(pt.x > 160 && pt.x < 560 && pt.y > 565 && pt.y < 615)){
+    // Dismiss keyboard if tapped outside the keyboard tray (above y=710, excluding the input & paste buttons)
+    if(roomCodeInputActive && pt.y < 710){
+      const inInputBox = (pt.x >= 110 && pt.x <= 460 && pt.y >= 545 && pt.y <= 600);
+      const inPasteBtn = (pt.x >= 475 && pt.x <= 610 && pt.y >= 545 && pt.y <= 600);
+      if(!inInputBox && !inPasteBtn){
         roomCodeInputActive = false;
+        playTone(320,'sine',0.04,0.05);
       }
     }
 
-    // HOST button
-    if((onlineState==='idle'||onlineState==='error')&&pt.x>180&&pt.x<540&&pt.y>350&&pt.y<410){
+    // HOST: Create Room button (when not already hosting)
+    if((onlineState==='idle'||onlineState==='error') && pt.x>140 && pt.x<580 && pt.y>300 && pt.y<365){
       roomCodeInputActive = false;
-      onlineRole='defender'; playerRole='defender'; initPeer(); return;
+      initHostRoom();
+      playTone(520,'triangle',0.1,0.1);
+      return;
     }
 
-    // Join code input box tap -> toggle keyboard
-    if(pt.x>160&&pt.x<560&&pt.y>565&&pt.y<615){
+    // HOST: When hosting — Copy Code & New Code buttons
+    if(onlineState==='hosting' || (onlineState==='connected' && onlineRole==='defender')){
+      // Copy Code button
+      if(pt.x>160 && pt.x<350 && pt.y>360 && pt.y<405){
+        copyRoomCodeToClipboard();
+        return;
+      }
+      // New Code button
+      if(pt.x>370 && pt.x<560 && pt.y>360 && pt.y<405){
+        initHostRoom();
+        playTone(440,'triangle',0.08,0.08);
+        return;
+      }
+    }
+
+    // JOIN: Code input box tap -> toggle keyboard
+    if(pt.x>=110 && pt.x<=460 && pt.y>=545 && pt.y<=600){
       roomCodeInputActive = !roomCodeInputActive;
       playTone(480,'triangle',0.06,0.08);
       return;
     }
 
-    // Virtual keyboard active clicks
-    if(roomCodeInputActive && pt.y >= 730){
-      // Hide button
-      if(pt.y <= 780 && pt.x >= 530){
+    // JOIN: Paste button
+    if(pt.x>=475 && pt.x<=610 && pt.y>=545 && pt.y<=600){
+      pasteRoomCodeFromClipboard();
+      return;
+    }
+
+    // Virtual keyboard key clicks (when active)
+    if(roomCodeInputActive && pt.y >= 710){
+      // Top Hide/Done button
+      if(pt.y <= 765 && pt.x >= 500){
         roomCodeInputActive = false;
         playTone(360,'sine',0.05,0.06);
         return;
       }
       // Key press in rows
-      if(pt.y >= 790 && pt.y <= 1020){
-        const rowIdx = Math.floor((pt.y - 790) / 56);
+      if(pt.y >= 775 && pt.y <= 1010){
+        const rowIdx = Math.floor((pt.y - 775) / 56);
         if(rowIdx >= 0 && rowIdx < KB_ROWS.length){
           const row = KB_ROWS[rowIdx];
           const keyCount = row.length;
@@ -1639,10 +1794,12 @@ canvas.addEventListener('pointerdown', e=>{
             const char = row[colIdx];
             if(char === '⌫') {
               roomCodeInput = roomCodeInput.slice(0, -1);
-            } else if(roomCodeInput.length < 8) {
+              playTone(360,'sine',0.05,0.06);
+            } else if(roomCodeInput.length < 6) {
               roomCodeInput += char;
+              playTone(520,'sine',0.05,0.08);
             }
-            playTone(520,'sine',0.05,0.08);
+            vibrate(15);
             return;
           }
         }
@@ -1650,23 +1807,25 @@ canvas.addEventListener('pointerdown', e=>{
       return;
     }
 
-    // JOIN button
-    if(pt.x>180&&pt.x<540&&pt.y>630&&pt.y<685){
+    // JOIN: Join button
+    if(pt.x>140 && pt.x<580 && pt.y>615 && pt.y<670){
       roomCodeInputActive = false;
       if(roomCodeInput.length>=3){
-        onlineRole='attacker'; playerRole='attacker'; joinPeer(roomCodeInput);
+        joinHostRoom(roomCodeInput);
       } else {
-        onlineStatus='Enter the host\'s room code first!';
+        onlineStatus = 'Enter the host\'s 4-letter room code first!';
+        playTone(180,'sawtooth',0.15,0.1);
       }
       return;
     }
 
-    // Back button
-    if(pt.x>200&&pt.x<520&&pt.y>845&&pt.y<900){
+    // Back to Home button
+    if(pt.x>200 && pt.x<520 && pt.y>830 && pt.y<885){
       roomCodeInputActive = false;
-      gameState='home';
-      if(peer){ try{peer.destroy();}catch(e){} }
-      peer=null; conn=null; onlineState='idle';
+      gameState = 'home';
+      disconnectMQTT();
+      onlineState = 'idle';
+      playTone(360,'sine',0.1,0.08);
       return;
     }
     return;
@@ -1827,7 +1986,7 @@ function forceUpdateGame() {
 // Service Worker with auto-update
 if('serviceWorker' in navigator && location.protocol.startsWith('http')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('./sw.js?v=9').then(reg => {
+    navigator.serviceWorker.register('./sw.js?v=11').then(reg => {
       reg.update();
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing;
