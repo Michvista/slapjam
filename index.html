@@ -208,6 +208,13 @@ let duelFinishReason = '';
 let attackerScore = 0;
 let onlineRematchLocalReady = false, onlineRematchRemoteReady = false;
 let onlineRematchStarting = false, onlineRematchStartAt = 0;
+// Keep the room identity through the result screen; gameMode can be changed by
+// other UI flows while the connected room still owns this duel.
+let onlineDuelSession = false;
+
+function isOnlineDuelSession() {
+  return onlineDuelSession || gameMode === 'online';
+}
 
 // Attacker (6 skills now)
 let attackerSkills = {
@@ -294,7 +301,7 @@ function finishDuel(winner, reason='', fromRemote=false, finalAttackerScore=null
 }
 
 function continueOnlineRematch() {
-  if (onlineRematchLocalReady || gameState === 'play') return;
+  if (!isOnlineDuelSession() || onlineRematchLocalReady || gameState === 'play') return;
   onlineRematchLocalReady = true;
   sendOnlineData({ type:'rematch_ready' });
   if (onlineRematchRemoteReady && onlineRole === 'defender') {
@@ -972,6 +979,7 @@ window.addEventListener('keydown', (e) => {
 // ─────────────────────────────────────────────────────────────
 function startGame(mode) {
   gameMode = mode;
+  onlineDuelSession = mode === 'online';
   gameState = 'play';
   if (mode === 'solo') playerRole = 'defender'; // solo is always defender view
   currentWave = 1;
@@ -2361,11 +2369,11 @@ function drawHowToPlayScreen(){
       badge: '⚔️ 5. CAMPAIGN, ENDLESS & 1v1 MODES',
       badgeCol: '#e040fb',
       lines: [
-        '• Solo: rescue 72–78% per wave and finish with a rising wall reserve.',
-        '• Endless: clear wave 20 to unlock infinite procedural survival.',
-        '• 1v1: rescue 3/4/5/6 knights and hold 70/55/40/25 wall HP by phase.',
-        '• Attackers score for siege actions and a fast keep breach.',
-        '• Online rematches start after both players press CONTINUE.'
+        '• Solo: save the quota and keep enough wall HP each wave.',
+        '• Duel: 4 phases × 30s. Match knight colors; tap beds to heal.',
+        '• Save 3 / 4 / 5 / 6; keep at least 70 / 55 / 40 / 25 wall HP.',
+        '• Defender wins after Phase 4 if 6 are saved and wall has 25+ HP.',
+        '• Miss a checkpoint or hit 0 HP? Attacker wins. Both Continue to rematch.'
       ]
     }
   ];
@@ -2425,7 +2433,8 @@ function drawEndScreen(isVictory){
   ctx.fillStyle='rgba(6,9,14,0.93)'; ctx.fillRect(0,0,W,H);
   ctx.fillStyle='#141e2b'; roundRect(ctx,50,300,620,680,16); ctx.fill();
   let hc,ht,sub;
-  if(gameMode==='vs'||gameMode==='online'){
+  const onlineDuel=isOnlineDuelSession();
+  if(gameMode==='vs'||onlineDuel){
     if(vsWinner==='attacker'){ hc='#ff5252'; ht='ATTACKER WINS!'; sub=duelFinishReason || 'The siege engines broke the keep wall! Castle fallen!'; }
     else{ hc='#ffd875'; ht='DEFENDER WINS! 🏆'; sub=duelFinishReason || 'All four assault phases repelled!'; }
   } else if(isVictory){
@@ -2439,24 +2448,24 @@ function drawEndScreen(isVictory){
   ctx.fillStyle=hc; ctx.font='900 34px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic'; ctx.fillText(ht,360,390);
   ctx.fillStyle='#a0b3c6'; ctx.font='15px Georgia,serif'; ctx.fillText(sub,360,428);
   ctx.fillStyle='#0d1520'; roundRect(ctx,90,458,540,200,12); ctx.fill();
-  const scoreTitle=gameMode==='online'?(playerRole==='attacker'?'ATTACKER SCORE':'DEFENDER SCORE'):(gameMode==='vs'?'DUEL SCORE':'KEEP SCORE');
+  const scoreTitle=onlineDuel?(playerRole==='attacker'?'ATTACKER SCORE':'DEFENDER SCORE'):(gameMode==='vs'?'DUEL SCORE':'KEEP SCORE');
   const finalScore=getRunScore();
   ctx.fillStyle='#a0b3c6'; ctx.font='bold 12px Georgia,serif'; ctx.textBaseline='alphabetic'; ctx.fillText(scoreTitle,360,490);
   ctx.fillStyle='#ffd875'; ctx.font='900 46px Georgia,serif'; ctx.textBaseline='middle'; ctx.fillText(`✦ ${finalScore}`,360,535);
-  const battleStats=(gameMode==='online'&&playerRole==='attacker')
+  const battleStats=(onlineDuel&&playerRole==='attacker')
     ? `Phases Reached: ${duelPhase}/4  •  Wall: ${Math.ceil(wallHP)}/${maxWallHP} HP`
     : `Knights Saved: ${knightsSaved}  •  Wall: ${Math.ceil(wallHP)}/${maxWallHP} HP`;
   ctx.fillStyle='#cfd8dc'; ctx.font='15px Georgia,serif'; ctx.textBaseline='alphabetic'; ctx.fillText(battleStats,360,598);
-  const scoreFootnote=(gameMode==='online'&&playerRole==='attacker')
+  const scoreFootnote=(onlineDuel&&playerRole==='attacker')
     ? `Siege actions scored  •  Best Score: ${bestScore}`
     : `Max Combo: x${maxCombo}  •  Best Score: ${bestScore}`;
   ctx.fillText(scoreFootnote,360,630);
-  const rematchLabel=gameMode!=='online'?'PLAY AGAIN'
+  const rematchLabel=!onlineDuel?'PLAY AGAIN'
     :onlineRematchStarting?'STARTING REMATCH...'
     :onlineRematchLocalReady?'WAITING FOR OPPONENT'
     :onlineRematchRemoteReady?'OPPONENT READY • CONTINUE':'CONTINUE';
-  ctx.fillStyle=onlineRematchLocalReady&&gameMode==='online'?'#53636d':'#d4af37'; roundRect(ctx,120,695,480,74,14); ctx.fill(); ctx.fillStyle='#06090e'; ctx.font='900 22px Georgia,serif'; ctx.textBaseline='middle'; ctx.fillText(rematchLabel,360,732);
-  const rematchHint=gameMode==='online'
+  ctx.fillStyle=onlineRematchLocalReady&&onlineDuel?'#53636d':'#d4af37'; roundRect(ctx,120,695,480,74,14); ctx.fill(); ctx.fillStyle='#06090e'; ctx.font='900 22px Georgia,serif'; ctx.textBaseline='middle'; ctx.fillText(rematchLabel,360,732);
+  const rematchHint=onlineDuel
     ?(onlineRematchLocalReady&&onlineRematchRemoteReady?'Both players ready — rematch starting...':onlineRematchLocalReady?'Waiting for the other player to continue...':onlineRematchRemoteReady?'The other player is ready. Continue when you are.':'Both players must continue to start the rematch.')
     :'Tap below to return to Main Menu';
   ctx.fillStyle='#90a4ae'; ctx.font='15px Georgia,serif'; ctx.textBaseline='alphabetic'; ctx.fillText(rematchHint,360,812);
@@ -2625,12 +2634,12 @@ canvas.addEventListener('pointerdown', e=>{
   // VICTORY / GAMEOVER
   if(gameState==='victory'||gameState==='gameover'){
     if(pt.x>120&&pt.x<600&&pt.y>695&&pt.y<769){
-      if(gameMode==='online') continueOnlineRematch();
+      if(isOnlineDuelSession()) continueOnlineRematch();
       else startGame(gameMode);
       return;
     }
     if(pt.y>802&&pt.y<860){
-      if(gameMode==='online'){ disconnectMQTT(); onlineState='idle'; }
+      if(isOnlineDuelSession()){ disconnectMQTT(); onlineState='idle'; onlineDuelSession=false; }
       gameState='home'; return;
     }
     return;
@@ -2793,7 +2802,7 @@ function forceUpdateGame() {
 // Service Worker with auto-update
 if('serviceWorker' in navigator && location.protocol.startsWith('http')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('./sw.js?v=13').then(reg => {
+    navigator.serviceWorker.register('./sw.js?v=14').then(reg => {
       reg.update();
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing;
