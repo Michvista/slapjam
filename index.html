@@ -409,7 +409,6 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
       keepAliveInterval: 30,
       cleanSession: true,
       mqttVersion: 4,
-      mqttVersionExplicit: true,
       onSuccess: () => {
         if (attemptId !== mqttAttemptId) return;
         if (relayAttemptTimer) { clearTimeout(relayAttemptTimer); relayAttemptTimer = null; }
