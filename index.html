@@ -401,12 +401,15 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
     relayAttemptTimer = setTimeout(() => {
       startBackup('connection timed out on this network');
     }, IS_IOS ? 25000 : 9000);
-    mqttClient.connect({
+    // Make MQTT 3.1.1 explicit so mobile Safari/Paho never has to infer the
+    // protocol version while creating the secure WebSocket connection.
+    const connectOptions = {
       useSSL: true,
-      ...(broker.username ? { userName:broker.username } : {}),
       timeout: IS_IOS ? 24 : 10,
       keepAliveInterval: 30,
       cleanSession: true,
+      mqttVersion: 4,
+      mqttVersionExplicit: true,
       onSuccess: () => {
         if (attemptId !== mqttAttemptId) return;
         if (relayAttemptTimer) { clearTimeout(relayAttemptTimer); relayAttemptTimer = null; }
@@ -449,7 +452,9 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
         if (attemptId !== mqttAttemptId) return;
         startBackup(err.errorMessage || `connection error ${err.errorCode || ''}`);
       }
-    });
+    };
+    if (broker.username) connectOptions.userName = String(broker.username);
+    mqttClient.connect(connectOptions);
   } catch(e) {
     startBackup(e.message || 'network error');
   }
