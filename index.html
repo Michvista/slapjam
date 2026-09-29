@@ -331,6 +331,7 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
   if (beaconInterval) { clearInterval(beaconInterval); beaconInterval = null; }
   brokerAttempt = brokerIdx;
   const attemptId = ++mqttAttemptId;
+  const broker = MQTT_BROKERS[brokerIdx];
 
   currentClientId = 'sr_' + (isHost ? 'host_' : 'guest_') + Math.random().toString(36).substring(2, 9);
   const topic = 'sr_jam2026_room_' + code;
@@ -359,7 +360,6 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
     }
   };
   try {
-    const broker = MQTT_BROKERS[brokerIdx];
     onlineStatus = `Connecting to relay ${brokerIdx + 1}/${MQTT_BROKERS.length} (${broker.host}:${broker.port})...`;
     mqttClient = new Paho.MQTT.Client(broker.host, broker.port, broker.path, currentClientId);
 
