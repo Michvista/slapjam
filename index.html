@@ -264,6 +264,8 @@ let beaconInterval = null;
 let currentClientId = '';
 let brokerAttempt = 0;
 let handshakeTimer = null;
+let mqttAttemptId = 0;
+let mqttRelayFailures = [];
 const MQTT_BROKERS = [
   // Port 443 works on phone networks that block less common WebSocket ports.
   { host:'demo.tbmq.io', port:443, path:'/mqtt', username:'demo' },
@@ -279,6 +281,7 @@ function generateRoomCode() {
 }
 
 function disconnectMQTT() {
+  mqttAttemptId++;
   if (beaconInterval) { clearInterval(beaconInterval); beaconInterval = null; }
   if (handshakeTimer) { clearTimeout(handshakeTimer); handshakeTimer = null; }
   if (mqttClient) {
@@ -290,6 +293,7 @@ function disconnectMQTT() {
 function initHostRoom() {
   disconnectMQTT();
   brokerAttempt = 0;
+  mqttRelayFailures = [];
   roomCode = generateRoomCode();
   onlineState = 'hosting';
   onlineRole = 'defender';
@@ -306,6 +310,7 @@ function joinHostRoom(code) {
   }
   disconnectMQTT();
   brokerAttempt = 0;
+  mqttRelayFailures = [];
   roomCode = clean;
   onlineState = 'joining';
   onlineRole = 'attacker';
@@ -323,24 +328,49 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
 
   if (beaconInterval) { clearInterval(beaconInterval); beaconInterval = null; }
   brokerAttempt = brokerIdx;
+  const attemptId = ++mqttAttemptId;
 
   currentClientId = 'sr_' + (isHost ? 'host_' : 'guest_') + Math.random().toString(36).substring(2, 9);
   const topic = 'sr_jam2026_room_' + code;
 
   let brokerConnected = false;
+  let backupStarted = false;
+  const startBackup = (reason) => {
+    if (attemptId !== mqttAttemptId || backupStarted) return;
+    backupStarted = true;
+    mqttRelayFailures.push(`${broker.host}:${broker.port}`);
+    if (brokerIdx + 1 < MQTT_BROKERS.length) {
+      const next = MQTT_BROKERS[brokerIdx + 1];
+      onlineStatus = `Relay ${broker.host}:${broker.port} failed. Trying backup ${next.host}:${next.port}...`;
+      setTimeout(() => {
+        if (attemptId === mqttAttemptId) connectMQTTRoom(code, isHost, brokerIdx + 1);
+      }, 250);
+    } else {
+      let detail = reason ? String(reason).replace(/\s+/g, ' ').slice(0, 90) : 'network did not accept the connection';
+      if (/socket|websocket/i.test(detail)) detail = 'secure WebSocket was blocked or closed by the network';
+      else if (/timed? ?out|timeout/i.test(detail)) detail = 'connection timed out';
+      else if (/certificate|ssl|tls/i.test(detail)) detail = 'secure connection certificate was rejected';
+      onlineStatus = `Can't reach an online relay from this phone.\nTried: ${mqttRelayFailures.join(', ')}. Last error: ${detail}.\nTry Wi-Fi, turn off VPN/data saver, and use the HTTPS game page.`;
+      onlineState = 'error';
+    }
+  };
   try {
     const broker = MQTT_BROKERS[brokerIdx];
+    onlineStatus = `Connecting to relay ${brokerIdx + 1}/${MQTT_BROKERS.length} (${broker.host}:${broker.port})...`;
     mqttClient = new Paho.MQTT.Client(broker.host, broker.port, broker.path, currentClientId);
 
     mqttClient.onConnectionLost = (responseObject) => {
+      if (attemptId !== mqttAttemptId) return;
       if (responseObject.errorCode !== 0) {
-        if (!brokerConnected && brokerIdx + 1 < MQTT_BROKERS.length) {
-          onlineStatus = 'Broker connection lost. Trying backup...';
-          setTimeout(() => connectMQTTRoom(code, isHost, brokerIdx + 1), 250);
+        if (!brokerConnected) {
+          startBackup(responseObject.errorMessage || 'connection closed');
           return;
         }
         if (gameState === 'play' && gameMode === 'online') {
           addFloatingText(360, 500, '⚠️ CONNECTION INTERRUPTED', '#ff5252', 24);
+        } else {
+          onlineStatus = 'Relay connection lost. Check the phone connection and retry.';
+          onlineState = 'error';
         }
       }
     };
@@ -356,12 +386,22 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
     mqttClient.connect({
       useSSL: true,
       ...(broker.username ? { userName:broker.username } : {}),
-      timeout: 15,
+      timeout: 10,
       keepAliveInterval: 30,
       cleanSession: true,
       onSuccess: () => {
+        if (attemptId !== mqttAttemptId) return;
         brokerConnected = true;
-        mqttClient.subscribe(topic, { qos: 0 });
+        const connectedClient = mqttClient;
+        connectedClient.subscribe(topic, {
+          qos: 0,
+          onFailure: (err) => {
+            if (attemptId !== mqttAttemptId) return;
+            brokerConnected = false;
+            try { connectedClient.disconnect(); } catch(e){}
+            startBackup(err.errorMessage || 'room subscription rejected');
+          }
+        });
 
         if (isHost) {
         onlineStatus = '✅ ROOM LIVE: ' + code + '\nWaiting for opponent to connect...';
@@ -387,23 +427,12 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
         }
       },
       onFailure: (err) => {
-        if (brokerIdx + 1 < MQTT_BROKERS.length) {
-          onlineStatus = 'Broker ' + (brokerIdx + 1) + ' unavailable. Trying backup...';
-          setTimeout(() => connectMQTTRoom(code, isHost, brokerIdx + 1), 250);
-        } else {
-          onlineStatus = 'Connection failed (' + (err.errorMessage || 'network unavailable') + '). Phone networks may block game relays; retry on Wi-Fi or use Local 1v1.';
-          onlineState = 'error';
-        }
+        if (attemptId !== mqttAttemptId) return;
+        startBackup(err.errorMessage || `connection error ${err.errorCode || ''}`);
       }
     });
   } catch(e) {
-    if (brokerIdx + 1 < MQTT_BROKERS.length) {
-      onlineStatus = 'Broker ' + (brokerIdx + 1) + ' unavailable. Trying backup...';
-      setTimeout(() => connectMQTTRoom(code, isHost, brokerIdx + 1), 250);
-    } else {
-      onlineStatus = 'Network error: ' + e.message;
-      onlineState = 'error';
-    }
+    startBackup(e.message || 'network error');
   }
 }
 
@@ -1746,10 +1775,20 @@ function drawOnlineScreen(){
 
   // Status box
   if(onlineStatus){
-    ctx.fillStyle='#0d1520'; roundRect(ctx,55,730,610,75,10); ctx.fill();
+    ctx.fillStyle='#0d1520'; roundRect(ctx,55,710,610,110,10); ctx.fill();
     ctx.strokeStyle='#37474f'; ctx.lineWidth=1; ctx.stroke();
     ctx.fillStyle='#69f0ae'; ctx.font='13px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
-    onlineStatus.split('\n').forEach((line,i)=>ctx.fillText(line,360,758+i*22));
+    const wrapped=[];
+    onlineStatus.split('\n').forEach(paragraph=>{
+      let line='';
+      for(const word of paragraph.split(' ')){
+        const next=line?line+' '+word:word;
+        if(line&&ctx.measureText(next).width>570){ wrapped.push(line); line=word; }
+        else line=next;
+      }
+      if(line) wrapped.push(line);
+    });
+    wrapped.slice(0,4).forEach((line,i)=>ctx.fillText(line,360,737+i*21));
   }
 
   // Back button
