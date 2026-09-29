@@ -113,9 +113,9 @@ function updateBGM(dt) {
 // GAME CONSTANTS
 // ─────────────────────────────────────────────────────────────
 const TRIAGE = {
-  CRITICAL: { key:'critical', name:'CRITICAL', color:'#ff334b', dark:'#5e0b16', life:9, pts:200, healTime:1.9, wallHeal:16, damage:32, icon:'💀' },
-  URGENT:   { key:'urgent',   name:'URGENT',   color:'#ffb300', dark:'#523800', life:13, pts:130, healTime:1.6, wallHeal:12, damage:24, icon:'⚡' },
-  MINOR:    { key:'minor',    name:'MINOR',    color:'#00e676', dark:'#004722', life:17, pts:85,  healTime:1.3, wallHeal:9,  damage:18, icon:'🛡️' }
+  CRITICAL: { key:'critical', name:'CRITICAL', color:'#ff334b', dark:'#5e0b16', life:6.5, pts:220, healTime:2.1, wallHeal:16, damage:38, icon:'💀' },
+  URGENT:   { key:'urgent',   name:'URGENT',   color:'#ffb300', dark:'#523800', life:9.5, pts:140, healTime:1.7, wallHeal:12, damage:26, icon:'⚡' },
+  MINOR:    { key:'minor',    name:'MINOR',    color:'#00e676', dark:'#004722', life:13.5,pts:90,  healTime:1.3, wallHeal:9,  damage:18, icon:'🛡️' }
 };
 
 const ARCHETYPES = {
@@ -128,28 +128,28 @@ const ARCHETYPES = {
   SENTINEL: { id:'sentinel', name:'Sentinel',       bonus:'🔔 RALLY ON HEAL!',         sentinel:true }
 };
 
-// 20 SOLO WAVES — escalating brutally, then INFINITE beyond wave 20
+// 20 HARDCORE SOLO WAVES — relentless escalation, then INFINITE beyond wave 20
 const WAVES = [
-  { wave:1,  name:'First Skirmish',          knights:6,  rate:3.5,  catapults:false, weather:'clear' },
-  { wave:2,  name:'Catapult Barrage',         knights:9,  rate:3.0,  catapults:true,  weather:'smoke' },
-  { wave:3,  name:'Storming the Gates',       knights:12, rate:2.6,  catapults:true,  weather:'storm' },
-  { wave:4,  name:'Iron Rain',                knights:14, rate:2.2,  catapults:true,  weather:'fire'  },
-  { wave:5,  name:'The Plague Wave',          knights:16, rate:1.9,  catapults:true,  weather:'siege' },
-  { wave:6,  name:'Twin Catapult Hell',       knights:19, rate:1.6,  catapults:true,  weather:'fire',  doubleCat:true },
-  { wave:7,  name:'Assault On All Fronts',    knights:22, rate:1.35, catapults:true,  weather:'siege', doubleCat:true },
-  { wave:8,  name:'Berserker Horde',          knights:25, rate:1.1,  catapults:true,  weather:'storm', doubleCat:true, rageMod:true },
-  { wave:9,  name:'Siege of the Citadel',     knights:28, rate:0.9,  catapults:true,  weather:'siege', doubleCat:true, rageMod:true },
-  { wave:10, name:'The First True Stand',     knights:32, rate:0.78, catapults:true,  weather:'siege', doubleCat:true, rageMod:true, finalStand:true },
-  { wave:11, name:'Hellfire Advance',         knights:34, rate:0.72, catapults:true,  weather:'fire',  doubleCat:true, rageMod:true },
-  { wave:12, name:'Plague Berserker Rush',    knights:36, rate:0.66, catapults:true,  weather:'siege', doubleCat:true, rageMod:true },
-  { wave:13, name:'The Iron Flood',           knights:38, rate:0.60, catapults:true,  weather:'storm', doubleCat:true, rageMod:true, finalStand:true },
-  { wave:14, name:'Warlord\'s Wrath',         knights:40, rate:0.55, catapults:true,  weather:'siege', doubleCat:true, rageMod:true },
-  { wave:15, name:'Midnight Siege',           knights:42, rate:0.50, catapults:true,  weather:'siege', doubleCat:true, rageMod:true, finalStand:true },
-  { wave:16, name:'The Blood Moon',           knights:45, rate:0.46, catapults:true,  weather:'fire',  doubleCat:true, rageMod:true, finalStand:true },
-  { wave:17, name:'Infernal Breach',          knights:48, rate:0.42, catapults:true,  weather:'siege', doubleCat:true, rageMod:true, finalStand:true },
-  { wave:18, name:'Siege Engine Storm',       knights:52, rate:0.38, catapults:true,  weather:'storm', doubleCat:true, rageMod:true, finalStand:true },
-  { wave:19, name:'The Warlord Himself',      knights:56, rate:0.34, catapults:true,  weather:'siege', doubleCat:true, rageMod:true, finalStand:true },
-  { wave:20, name:'⚔️ ULTIMATE SIEGE',        knights:65, rate:0.28, catapults:true,  weather:'siege', doubleCat:true, rageMod:true, finalStand:true }
+  { wave:1,  name:'First Skirmish',          knights:7,  rate:2.4,  catapults:true,  weather:'clear' },
+  { wave:2,  name:'Catapult Barrage',         knights:10, rate:2.0,  catapults:true,  weather:'smoke' },
+  { wave:3,  name:'Storming the Gates',       knights:13, rate:1.7,  catapults:true,  weather:'storm' },
+  { wave:4,  name:'Iron Rain',                knights:16, rate:1.4,  catapults:true,  weather:'fire'  },
+  { wave:5,  name:'The Plague Wave',          knights:19, rate:1.15, catapults:true,  weather:'siege' },
+  { wave:6,  name:'Twin Catapult Hell',       knights:22, rate:0.95, catapults:true,  weather:'fire',  doubleCat:true },
+  { wave:7,  name:'Assault On All Fronts',    knights:26, rate:0.80, catapults:true,  weather:'siege', doubleCat:true },
+  { wave:8,  name:'Berserker Horde',          knights:30, rate:0.68, catapults:true,  weather:'storm', doubleCat:true, rageMod:true },
+  { wave:9,  name:'Siege of the Citadel',     knights:35, rate:0.58, catapults:true,  weather:'siege', doubleCat:true, rageMod:true },
+  { wave:10, name:'The Citadel Breach',       knights:40, rate:0.50, catapults:true,  weather:'siege', doubleCat:true, rageMod:true, finalStand:true },
+  { wave:11, name:'Hellfire Advance',         knights:44, rate:0.45, catapults:true,  weather:'fire',  doubleCat:true, rageMod:true },
+  { wave:12, name:'Plague Berserker Rush',    knights:48, rate:0.40, catapults:true,  weather:'siege', doubleCat:true, rageMod:true },
+  { wave:13, name:'The Iron Flood',           knights:52, rate:0.36, catapults:true,  weather:'storm', doubleCat:true, rageMod:true, finalStand:true },
+  { wave:14, name:'Warlord\'s Wrath',         knights:56, rate:0.32, catapults:true,  weather:'siege', doubleCat:true, rageMod:true },
+  { wave:15, name:'Midnight Inferno',         knights:60, rate:0.29, catapults:true,  weather:'siege', doubleCat:true, rageMod:true, finalStand:true },
+  { wave:16, name:'The Blood Moon',           knights:64, rate:0.26, catapults:true,  weather:'fire',  doubleCat:true, rageMod:true, finalStand:true },
+  { wave:17, name:'Infernal Breach',          knights:68, rate:0.24, catapults:true,  weather:'siege', doubleCat:true, rageMod:true, finalStand:true },
+  { wave:18, name:'Siege Engine Storm',       knights:72, rate:0.22, catapults:true,  weather:'storm', doubleCat:true, rageMod:true, finalStand:true },
+  { wave:19, name:'The Warlord Vanguard',     knights:76, rate:0.20, catapults:true,  weather:'siege', doubleCat:true, rageMod:true, finalStand:true },
+  { wave:20, name:'⚔️ ULTIMATE SIEGE',        knights:85, rate:0.18, catapults:true,  weather:'siege', doubleCat:true, rageMod:true, finalStand:true }
 ];
 
 // Generates a procedural infinite wave beyond wave 20
@@ -158,8 +158,8 @@ function getInfiniteWave(waveNum) {
   return {
     wave: waveNum,
     name: `♾️ ENDLESS WAVE ${waveNum}`,
-    knights: 65 + n * 8,
-    rate: Math.max(0.18, 0.28 - n * 0.008),
+    knights: 85 + n * 10,
+    rate: Math.max(0.12, 0.18 - n * 0.005),
     catapults: true,
     weather: ['siege','fire','storm','siege','fire'][n % 5],
     doubleCat: true,
@@ -350,9 +350,9 @@ function startGame(mode) {
   gameState = 'play';
   currentWave = 1;
   infiniteMode = false;
-  // Defender advantage: start with 120 HP (not 100)
-  maxWallHP = 120;
-  wallHP = 120;
+  // Standard Keep Integrity: 100 HP
+  maxWallHP = 100;
+  wallHP = 100;
   score = 0; combo = 0; maxCombo = 0;
   knightsSaved = 0; knightsLost = 0;
   waveKnightsSaved = 0; waveKnightsLost = 0;
@@ -1131,167 +1131,140 @@ function drawTutorialHint(){
 // ─────────────────────────────────────────────────────────────
 function drawHomeScreen(){
   ctx.fillStyle='rgba(6,9,14,0.93)'; ctx.fillRect(0,0,W,H);
-  ctx.fillStyle='#141e2b'; roundRect(ctx,45,180,630,860,16); ctx.fill();
+  ctx.fillStyle='#141e2b'; roundRect(ctx,45,150,630,920,16); ctx.fill();
   ctx.strokeStyle='#d4af37'; ctx.lineWidth=3; ctx.stroke();
 
-  ctx.fillStyle='#ffd875'; ctx.font='900 50px Georgia,serif'; ctx.textAlign='center'; ctx.fillText('SIEGE ROUNDS',360,270);
-  ctx.fillStyle='#a0b3c6'; ctx.font='16px Georgia,serif'; ctx.fillText('Castle Infirmary Triage Defense',360,310);
+  // Version Pill
+  ctx.fillStyle='rgba(212,175,55,0.18)'; roundRect(ctx,230,170,260,28,14); ctx.fill();
+  ctx.strokeStyle='#d4af37'; ctx.lineWidth=1; ctx.stroke();
+  ctx.fillStyle='#ffd875'; ctx.font='bold 12px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('v3.5 • 20 WAVES & ENDLESS',360,184);
+
+  ctx.fillStyle='#ffd875'; ctx.font='900 46px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  ctx.fillText('SIEGE ROUNDS',360,245);
+  ctx.fillStyle='#a0b3c6'; ctx.font='15px Georgia,serif'; ctx.fillText('Castle Infirmary Triage Defense',360,278);
 
   ctx.fillStyle='#cfd8dc'; ctx.font='14px Georgia,serif';
-  ctx.fillText('Enemy siege engines are battering the walls!',360,375);
-  ctx.fillText('Drag wounded knights to matching triage beds.',360,402);
-  ctx.fillText('Heal them so they rush back to defend the keep!',360,429);
+  ctx.fillText('The enemy siege is relentless! Your wall has 100 HP.',360,335);
+  ctx.fillText('Match wounded knights to triage beds before they bleed out.',360,360);
+  ctx.fillText('Heal knights so they rush up to defend the castle ramparts!',360,385);
 
   // SOLO
-  ctx.fillStyle='#d4af37'; roundRect(ctx,100,462,520,72,14); ctx.fill();
+  ctx.fillStyle='#d4af37'; roundRect(ctx,100,415,520,74,14); ctx.fill();
   ctx.strokeStyle='#fff8e1'; ctx.lineWidth=2; ctx.stroke();
-  ctx.fillStyle='#06090e'; ctx.font='900 22px Georgia,serif'; ctx.fillText('🛡️ SOLO DEFENSE',360,496);
-  ctx.font='12px Georgia,serif'; ctx.fillText(`20 brutal waves + ♾️ Endless mode`,360,518);
+  ctx.fillStyle='#06090e'; ctx.font='900 22px Georgia,serif'; ctx.textBaseline='middle'; ctx.fillText('🛡️ PLAY SOLO DEFENSE',360,443);
+  ctx.font='12px Georgia,serif'; ctx.fillText('20 Hardcore Waves • 60% Quota • Endless Mode Unlock',360,467);
 
   // 1v1 LOCAL
-  ctx.fillStyle='#1e2c3e'; roundRect(ctx,100,552,520,72,14); ctx.fill();
+  ctx.fillStyle='#1e2c3e'; roundRect(ctx,100,505,520,70,14); ctx.fill();
   ctx.strokeStyle='#ff5252'; ctx.lineWidth=2; ctx.stroke();
-  ctx.fillStyle='#ffd875'; ctx.font='900 20px Georgia,serif'; ctx.fillText('⚔️ 1v1 LOCAL (SAME PHONE)',360,585);
-  ctx.font='12px Georgia,serif'; ctx.fillStyle='#ff8a80'; ctx.fillText('Offline • Attacker vs Defender on 1 phone',360,607);
+  ctx.fillStyle='#ffd875'; ctx.font='900 20px Georgia,serif'; ctx.fillText('⚔️ 1v1 LOCAL (SAME PHONE)',360,532);
+  ctx.font='12px Georgia,serif'; ctx.fillStyle='#ff8a80'; ctx.fillText('Offline • P1 Warlord (Top) vs P2 Medic (Bottom)',360,554);
 
   // ONLINE vs different phones
-  ctx.fillStyle='#1a2e1a'; roundRect(ctx,100,642,520,72,14); ctx.fill();
+  ctx.fillStyle='#1a2e1a'; roundRect(ctx,100,590,520,70,14); ctx.fill();
   ctx.strokeStyle='#00e676'; ctx.lineWidth=2; ctx.stroke();
-  ctx.fillStyle='#69f0ae'; ctx.font='900 20px Georgia,serif'; ctx.fillText('🌐 ONLINE — DIFFERENT PHONES',360,675);
-  ctx.font='12px Georgia,serif'; ctx.fillStyle='#a5d6a7'; ctx.fillText('Peer-to-peer • No server needed • Real-time 1v1',360,697);
+  ctx.fillStyle='#69f0ae'; ctx.font='900 20px Georgia,serif'; ctx.fillText('🌐 ONLINE — DIFFERENT PHONES',360,617);
+  ctx.font='12px Georgia,serif'; ctx.fillStyle='#a5d6a7'; ctx.fillText('Real-time WebRTC P2P • No server needed',360,639);
 
   // HOW TO PLAY
-  ctx.fillStyle='#263546'; roundRect(ctx,100,730,520,58,12); ctx.fill();
+  ctx.fillStyle='#263546'; roundRect(ctx,100,675,520,56,12); ctx.fill();
   ctx.strokeStyle='#78909c'; ctx.lineWidth=1; ctx.stroke();
-  ctx.fillStyle='#ffffff'; ctx.font='bold 17px Georgia,serif'; ctx.fillText('📜 HOW TO PLAY',360,766);
+  ctx.fillStyle='#ffffff'; ctx.font='bold 17px Georgia,serif'; ctx.fillText('📜 HOW TO PLAY & SURVIVAL MANUAL',360,703);
 
-  ctx.fillStyle='#d4af37'; ctx.font='bold 15px Georgia,serif'; ctx.fillText(`🏆 BEST SCORE: ${bestScore}`,360,852);
-  ctx.fillStyle=soundOn?'#2e7d32':'#c62828'; roundRect(ctx,280,878,160,42,8); ctx.fill();
-  ctx.fillStyle='#fff'; ctx.font='bold 13px Georgia,serif'; ctx.fillText(soundOn?'🔊 SOUND ON':'🔇 SOUND OFF',360,904);
-}
+  // High score
+  ctx.fillStyle='#d4af37'; ctx.font='bold 15px Georgia,serif'; ctx.textBaseline='alphabetic'; ctx.fillText(`🏆 BEST SCORE: ${bestScore}`,360,770);
 
-// Role selection for 1v1 local
-function drawRoleSelectScreen(){
-  ctx.fillStyle='rgba(6,9,14,0.94)'; ctx.fillRect(0,0,W,H);
-  ctx.fillStyle='#141e2b'; roundRect(ctx,60,260,600,760,16); ctx.fill();
-  ctx.strokeStyle='#d4af37'; ctx.lineWidth=3; ctx.stroke();
-  ctx.fillStyle='#ffd875'; ctx.font='900 34px Georgia,serif'; ctx.textAlign='center';
-  ctx.fillText('CHOOSE YOUR ROLE',360,340);
-  ctx.fillStyle='#a0b3c6'; ctx.font='16px Georgia,serif'; ctx.fillText('Who presses which buttons?',360,380);
+  // Sound toggle
+  ctx.fillStyle=soundOn?'#2e7d32':'#c62828'; roundRect(ctx,160,795,180,44,8); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font='bold 13px Georgia,serif'; ctx.textBaseline='middle'; ctx.fillText(soundOn?'🔊 SOUND ON':'🔇 SOUND OFF',250,817);
 
-  // Attacker
-  ctx.fillStyle='#2a0f0f'; roundRect(ctx,90,420,540,200,14); ctx.fill();
-  ctx.strokeStyle='#ff5252'; ctx.lineWidth=3; ctx.stroke();
-  ctx.fillStyle='#ff5252'; ctx.font='900 26px Georgia,serif'; ctx.fillText('🗡️ WARLORD (ATTACKER)',360,470);
-  ctx.fillStyle='#ffcdd2'; ctx.font='14px Georgia,serif';
-  ctx.fillText('Launches catapults, fire arrows, siege towers',360,505);
-  ctx.fillText('Controls the TOP bar — destroy the castle!',360,530);
-  ctx.fillStyle='#ff8a80'; ctx.font='bold 13px Georgia,serif'; ctx.fillText('Player 1 taps from the TOP of the screen',360,560);
-  ctx.fillStyle='#ff5252'; ctx.font='bold 16px Georgia,serif'; ctx.fillText('TAP HERE TO PLAY AS ATTACKER →',360,598);
+  // Force Update / Clear Cache button
+  ctx.fillStyle='#37474f'; roundRect(ctx,360,795,200,44,8); ctx.fill();
+  ctx.strokeStyle='#78909c'; ctx.lineWidth=1; ctx.stroke();
+  ctx.fillStyle='#cfd8dc'; ctx.font='bold 12px Georgia,serif'; ctx.fillText('🔄 REFRESH / UPDATE',460,817);
 
-  // Defender
-  ctx.fillStyle='#0a1f2a'; roundRect(ctx,90,640,540,220,14); ctx.fill();
-  ctx.strokeStyle='#00e676'; ctx.lineWidth=3; ctx.stroke();
-  ctx.fillStyle='#00e676'; ctx.font='900 26px Georgia,serif'; ctx.fillText('🛡️ MEDIC (DEFENDER)',360,695);
-  ctx.fillStyle='#c8e6c9'; ctx.font='14px Georgia,serif';
-  ctx.fillText('Runs the infirmary — save knights, repair walls!',360,730);
-  ctx.fillText('Controls the BOTTOM area — survive 120 seconds!',360,755);
-  ctx.fillStyle='#a5d6a7'; ctx.font='bold 13px Georgia,serif'; ctx.fillText('Player 2 taps from the BOTTOM of the screen',360,785);
-  ctx.fillStyle='#69f0ae'; ctx.font='bold 16px Georgia,serif'; ctx.fillText('TAP HERE TO PLAY AS DEFENDER →',360,828);
-
-  ctx.fillStyle='#546e7a'; roundRect(ctx,220,885,320,50,10); ctx.fill();
-  ctx.fillStyle='#fff'; ctx.font='bold 16px Georgia,serif'; ctx.fillText('← BACK',360,916);
-}
-
-// Online lobby screen
-function drawOnlineScreen(){
-  ctx.fillStyle='rgba(6,9,14,0.95)'; ctx.fillRect(0,0,W,H);
-  ctx.fillStyle='#141e2b'; roundRect(ctx,50,220,620,840,16); ctx.fill();
-  ctx.strokeStyle='#00e676'; ctx.lineWidth=3; ctx.stroke();
-  ctx.fillStyle='#69f0ae'; ctx.font='900 30px Georgia,serif'; ctx.textAlign='center';
-  ctx.fillText('🌐 ONLINE MULTIPLAYER',360,290);
-  ctx.fillStyle='#a0b3c6'; ctx.font='14px Georgia,serif'; ctx.fillText('Peer-to-Peer — No server needed',360,325);
-
-  // HOST section
-  ctx.fillStyle='#0a1f2a'; roundRect(ctx,80,360,560,200,14); ctx.fill();
-  ctx.strokeStyle='#00e676'; ctx.lineWidth=2; ctx.stroke();
-  ctx.fillStyle='#69f0ae'; ctx.font='900 20px Georgia,serif'; ctx.fillText('🏰 HOST A GAME (YOU ARE DEFENDER)',360,405);
-  ctx.fillStyle='#cfd8dc'; ctx.font='13px Georgia,serif'; ctx.fillText('You run the infirmary. Share the room code with attacker.',360,435);
-  if(onlineState==='hosting'||onlineState==='connected'){
-    ctx.fillStyle='#ffd875'; ctx.font='900 40px Georgia,serif'; ctx.fillText(roomCode,360,487);
-    ctx.fillStyle='#a5d6a7'; ctx.font='13px Georgia,serif'; ctx.fillText('Share this code with your opponent!',360,515);
-  } else {
-    ctx.fillStyle='#00e676'; roundRect(ctx,180,445,400,60,12); ctx.fill();
-    ctx.fillStyle='#06090e'; ctx.font='900 20px Georgia,serif'; ctx.fillText('TAP TO HOST GAME',360,482);
-  }
-
-  // JOIN section
-  ctx.fillStyle='#1a1a0a'; roundRect(ctx,80,580,560,200,14); ctx.fill();
-  ctx.strokeStyle='#ffd875'; ctx.lineWidth=2; ctx.stroke();
-  ctx.fillStyle='#ffd875'; ctx.font='900 20px Georgia,serif'; ctx.fillText('⚔️ JOIN A GAME (YOU ARE ATTACKER)',360,625);
-  ctx.fillStyle='#cfd8dc'; ctx.font='13px Georgia,serif'; ctx.fillText('You launch the siege. Enter the host\'s room code.',360,655);
-  // Code input display
-  ctx.fillStyle='#0d1520'; roundRect(ctx,160,668,400,48,10); ctx.fill();
-  ctx.strokeStyle=roomCodeInputActive?'#ffd875':'#546e7a'; ctx.lineWidth=2; ctx.stroke();
-  ctx.fillStyle=roomCodeInput?'#ffffff':'#546e7a'; ctx.font='900 24px Georgia,serif';
-  ctx.fillText(roomCodeInput||'TAP TO ENTER CODE',360,700);
-  ctx.fillStyle='#ff9800'; roundRect(ctx,180,730,360,52,12); ctx.fill();
-  ctx.fillStyle='#06090e'; ctx.font='900 20px Georgia,serif'; ctx.fillText('JOIN GAME',360,763);
-
-  // Status
-  if(onlineStatus){
-    ctx.fillStyle='#1c2838'; roundRect(ctx,80,802,560,80,10); ctx.fill();
-    ctx.fillStyle='#69f0ae'; ctx.font='13px Georgia,serif';
-    onlineStatus.split('\n').forEach((line,i)=>ctx.fillText(line,360,832+i*22));
-  }
-
-  // Virtual keyboard for room code
-  if(roomCodeInputActive){
-    drawVirtualKeyboard();
-  }
-
-  ctx.fillStyle='#546e7a'; roundRect(ctx,220,1020,280,50,10); ctx.fill();
-  ctx.fillStyle='#fff'; ctx.font='bold 16px Georgia,serif'; ctx.fillText('← BACK TO HOME',360,1051);
-}
-
-const KB_CHARS = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','0','1','2','3','4','5','6','7','8','9','⌫'];
-function drawVirtualKeyboard(){
-  ctx.fillStyle='rgba(6,9,14,0.97)'; ctx.fillRect(0,830,W,H-830);
-  const cols=9, rows=Math.ceil(KB_CHARS.length/cols);
-  KB_CHARS.forEach((c,i)=>{
-    const col=i%cols, row=Math.floor(i/cols);
-    const kx=18+col*(W-36)/cols, ky=840+row*58;
-    const kw=(W-36)/cols-4;
-    ctx.fillStyle='#1c2838'; roundRect(ctx,kx,ky,kw,50,6); ctx.fill();
-    ctx.strokeStyle='#d4af37'; ctx.lineWidth=1; ctx.stroke();
-    ctx.fillStyle='#ffd875'; ctx.font='bold 18px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText(c,kx+kw/2,ky+25);
-  });
+  ctx.fillStyle='#78909c'; ctx.font='11px Georgia,serif'; ctx.textBaseline='alphabetic';
+  ctx.fillText('Slapjam AI Jam Entry • Built with HTML5 Canvas',360,885);
 }
 
 function drawHowToPlayScreen(){
-  ctx.fillStyle='rgba(6,9,14,0.94)'; ctx.fillRect(0,0,W,H);
-  ctx.fillStyle='#141e2b'; roundRect(ctx,40,160,640,980,16); ctx.fill();
+  ctx.fillStyle='rgba(6,9,14,0.95)'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#141e2b'; roundRect(ctx,35,80,650,1120,16); ctx.fill();
   ctx.strokeStyle='#d4af37'; ctx.lineWidth=3; ctx.stroke();
-  ctx.fillStyle='#ffd875'; ctx.font='900 30px Georgia,serif'; ctx.textAlign='center'; ctx.fillText('FIELD MEDIC GUIDE',360,215);
-  const tips=[
-    {title:'1. TRIAGE MATCHING', desc:'TAP or DRAG knights to matching beds: Red=Critical, Yellow=Urgent, Green=Minor.'},
-    {title:'2. TAP TO HEAL', desc:'Tap occupied beds rapidly to treat wounds. Healed knights sprint to reinforce the wall!'},
-    {title:'3. SPECIAL KNIGHTS', desc:'👑 Prince: +400 pts + shield! 🏹 Archer: shoots catapults! ☣️ Cursed: purify first! 💢 Berserker: treat FAST!'},
-    {title:'4. DEFENDER SKILLS (4 powers!)', desc:'🧪 Elixir (18s): boost all healing. 🛡️ Barricade (32s): 9s immunity. 🔔 Rally (28s): extend timers. 🏰 Fortress (45s): +25 wall HP.'},
-    {title:'5. ATTACKER SKILLS (1v1)', desc:'🪨 Catapult 🏹 Volley 🪜 Ladders ☣️ Plague 🏗️ Siege Tower 🗡️ Assassin — escalating mayhem!'},
-    {title:'6. 10 WAVES (SOLO)', desc:'Waves escalate: twin catapults, berserker hordes, final stand. Survive ALL 10 to win!'},
-    {title:'7. ONLINE (DIFFERENT PHONES)', desc:'Host taps "HOST" → gets a code. Joiner enters the code. P2P — no server needed!'}
+
+  ctx.fillStyle='#ffd875'; ctx.font='900 32px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  ctx.fillText('FIELD MEDIC SURVIVAL MANUAL',360,135);
+  ctx.fillStyle='#a0b3c6'; ctx.font='14px Georgia,serif'; ctx.fillText('Master Triage to Save the Castle from Falling',360,162);
+
+  const guideCards = [
+    {
+      badge: '🚨 1. TRIAGE WARDS & BLEEDOUT TIMERS',
+      badgeCol: '#ff5252',
+      lines: [
+        '💀 CRITICAL (RED): Bleeds in ~6s! Deals 38 wall damage if lost.',
+        '⚡ URGENT (YELLOW): Bleeds in ~9s! Deals 26 wall damage if lost.',
+        '🛡️ MINOR (GREEN): Bleeds in ~13s! Deals 18 wall damage if lost.'
+      ]
+    },
+    {
+      badge: '👆 2. HOW TO TREAT PATIENTS',
+      badgeCol: '#ffd875',
+      lines: [
+        '• TAP a wounded knight, then TAP the matching colored bed cot (or drag).',
+        '• TAP the occupied bed RAPIDLY to heal wounds until the circle fills.',
+        '• Healed knights immediately sprint to the ramparts to fight!'
+      ]
+    },
+    {
+      badge: '👑 3. SPECIAL KNIGHT HEROES',
+      badgeCol: '#69f0ae',
+      lines: [
+        '👑 Royal Prince: +400 pts and triggers a 9-second Wall Shield!',
+        '🏹 Longbow Archer: Shoots down incoming catapult fireballs mid-air!',
+        '☣️ Cursed Knight: Must TAP TO PURIFY poison before healing!',
+        '💢 Berserker: Bleeds faster if unattended — treat urgently!'
+      ]
+    },
+    {
+      badge: '🧪 4. DEFENDER EMERGENCY POWERS',
+      badgeCol: '#40c4ff',
+      lines: [
+        '🧪 Elixir (18s CD): Instantly advances healing on ALL beds.',
+        '🛡️ Barricade (32s CD): 9 seconds of complete wall immunity.',
+        '🔔 Rally (28s CD): Extends bleedout timers for all patients.',
+        '🏰 Fortress (45s CD): Instantly repairs +25 Wall HP.'
+      ]
+    },
+    {
+      badge: '⚔️ 5. CAMPAIGN, ENDLESS & 1v1 MODES',
+      badgeCol: '#e040fb',
+      lines: [
+        '• Solo: 20 escalating waves. Must save at least 60% of knights to pass.',
+        '• Endless: Beat wave 20 to unlock infinite procedural survival!',
+        '• 1v1 Online/Local: One attacks with siege engines, one defends!'
+      ]
+    }
   ];
-  tips.forEach((t,i)=>{
-    const y=255+i*103;
-    ctx.fillStyle='#1c2838'; roundRect(ctx,60,y,600,88,10); ctx.fill();
-    ctx.strokeStyle='#d4af37'; ctx.lineWidth=1; ctx.stroke();
-    ctx.fillStyle='#ffd875'; ctx.font='bold 14px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='alphabetic'; ctx.fillText(t.title,80,y+30);
-    ctx.fillStyle='#cfd8dc'; ctx.font='12px Georgia,serif'; ctx.fillText(t.desc,80,y+60);
+
+  guideCards.forEach((g,i)=>{
+    const y = 185 + i * 180;
+    ctx.fillStyle='#1c2838'; roundRect(ctx,55,y,610,168,12); ctx.fill();
+    ctx.strokeStyle=g.badgeCol; ctx.lineWidth=1.5; ctx.stroke();
+
+    ctx.fillStyle=g.badgeCol; ctx.font='900 15px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+    ctx.fillText(g.badge,75,y+30);
+
+    ctx.fillStyle='#cfd8dc'; ctx.font='13px Georgia,serif';
+    g.lines.forEach((l,li)=>{
+      ctx.fillText(l,75,y+60+li*30);
+    });
   });
-  ctx.fillStyle='#d4af37'; roundRect(ctx,160,990,400,60,12); ctx.fill();
-  ctx.fillStyle='#06090e'; ctx.font='900 20px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('BACK TO HOME',360,1020);
+
+  // Back button
+  ctx.fillStyle='#d4af37'; roundRect(ctx,160,1110,400,60,12); ctx.fill();
+  ctx.fillStyle='#06090e'; ctx.font='900 22px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('BACK TO HOME',360,1140);
 }
 
 function drawPauseScreen(){
@@ -1367,11 +1340,12 @@ canvas.addEventListener('pointerdown', e=>{
 
   // HOME SCREEN
   if(gameState==='home'){
-    if(pt.x>280&&pt.x<440&&pt.y>878&&pt.y<920){ soundOn=!soundOn; localStorage.setItem('sr_sound',soundOn?'1':'0'); playTone(520,'sine',0.1,0.1); return; }
-    if(pt.x>100&&pt.x<620&&pt.y>462&&pt.y<534){ startGame('solo'); return; }
-    if(pt.x>100&&pt.x<620&&pt.y>552&&pt.y<624){ playerRole='defender'; gameState='roleselect'; playTone(440,'triangle',0.1,0.08); return; }
-    if(pt.x>100&&pt.x<620&&pt.y>642&&pt.y<714){ gameState='online'; onlineState='idle'; onlineStatus=''; roomCodeInput=''; roomCodeInputActive=false; playTone(440,'triangle',0.1,0.08); return; }
-    if(pt.x>100&&pt.x<620&&pt.y>730&&pt.y<788){ gameState='howtoplay'; playTone(440,'triangle',0.1,0.08); return; }
+    if(pt.x>100&&pt.x<620&&pt.y>415&&pt.y<489){ startGame('solo'); return; }
+    if(pt.x>100&&pt.x<620&&pt.y>505&&pt.y<575){ playerRole='defender'; gameState='roleselect'; playTone(440,'triangle',0.1,0.08); return; }
+    if(pt.x>100&&pt.x<620&&pt.y>590&&pt.y<660){ gameState='online'; onlineState='idle'; onlineStatus=''; roomCodeInput=''; roomCodeInputActive=false; playTone(440,'triangle',0.1,0.08); return; }
+    if(pt.x>100&&pt.x<620&&pt.y>675&&pt.y<731){ gameState='howtoplay'; playTone(440,'triangle',0.1,0.08); return; }
+    if(pt.x>160&&pt.x<340&&pt.y>795&&pt.y<839){ soundOn=!soundOn; localStorage.setItem('sr_sound',soundOn?'1':'0'); playTone(520,'sine',0.1,0.1); return; }
+    if(pt.x>360&&pt.x<560&&pt.y>795&&pt.y<839){ forceUpdateGame(); return; }
     return;
   }
 
@@ -1416,7 +1390,10 @@ canvas.addEventListener('pointerdown', e=>{
   }
 
   // HOW TO PLAY
-  if(gameState==='howtoplay'){ if(pt.x>160&&pt.x<560&&pt.y>990&&pt.y<1050){ gameState='home'; playTone(360,'triangle',0.1,0.08); } return; }
+  if(gameState==='howtoplay'){
+    if(pt.x>160&&pt.x<560&&pt.y>1100&&pt.y<1180){ gameState='home'; playTone(360,'triangle',0.1,0.08); return; }
+    return;
+  }
 
   // PAUSE
   if(gameState==='pause'){
@@ -1546,9 +1523,39 @@ function gameLoop(now){
 }
 requestAnimationFrame(gameLoop);
 
-// Service Worker
+// Force Cache Purge & Refresh
+function forceUpdateGame() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(regs => {
+      for (let reg of regs) reg.unregister();
+    });
+  }
+  if ('caches' in window) {
+    caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).then(() => {
+      window.location.reload(true);
+    });
+  } else {
+    window.location.reload(true);
+  }
+}
+
+// Service Worker with auto-update
 if('serviceWorker' in navigator && location.protocol.startsWith('http')){
-  window.addEventListener('load',()=>{ navigator.serviceWorker.register('./sw.js').catch(()=>{}); });
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('./sw.js?v=9').then(reg => {
+      reg.update();
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        if (newWorker) {
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'activated' && !navigator.serviceWorker.controller) {
+              window.location.reload();
+            }
+          });
+        }
+      });
+    }).catch(()=>{});
+  });
 }
 
 })();
