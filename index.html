@@ -452,7 +452,12 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
         startBackup(err.errorMessage || `connection error ${err.errorCode || ''}`);
       }
     };
-    if (broker.username) connectOptions.userName = String(broker.username);
+    if (broker.username) {
+      connectOptions.userName = String(broker.username);
+      // Paho 1.0.1 requires a password field whenever userName is present;
+      // TBMQ's public demo account explicitly uses an empty password.
+      connectOptions.password = '';
+    }
     mqttClient.connect(connectOptions);
   } catch(e) {
     startBackup(e.message || 'network error');
