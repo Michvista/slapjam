@@ -209,6 +209,7 @@ let duelPhaseWinners = [null,null,null,null], duelPhasePopup = null;
 let duelPendingNextPhase = 0;
 let onlinePhaseLocalReady = false, onlinePhaseRemoteReady = false;
 let onlinePhaseStarting = false, onlinePhaseStartAt = 0;
+const ONLINE_PHASE_SAVES = 6;
 let duelFinishReason = '';
 let attackerScore = 0;
 let onlineRematchLocalReady = false, onlineRematchRemoteReady = false;
@@ -308,7 +309,7 @@ function finishDuel(winner, reason='', fromRemote=false, finalAttackerScore=null
 function recordDuelPhaseResult(phase, rescued, remainingWall=wallHP, declaredWinner=null) {
   const phaseIndex=phase-1;
   if(phaseIndex<0||phaseIndex>=DUEL_PHASES.length||duelPhaseWinners[phaseIndex]) return;
-  const required=DUEL_PHASES[phaseIndex].rescued;
+  const required=getDuelPhaseTarget(phase);
   const winner=declaredWinner||(rescued>=required?'defender':'attacker');
   duelPhaseWinners[phaseIndex]=winner;
   const defenderWins=duelPhaseWinners.filter(result=>result==='defender').length;
@@ -334,11 +335,27 @@ function getDuelPhaseTimeLeft() {
   return Math.max(0,vsTimeLeft-(DUEL_PHASES.length-duelPhase)*30);
 }
 
+function getDuelPhaseTarget(phase=duelPhase) {
+  return gameMode==='online'?ONLINE_PHASE_SAVES:DUEL_PHASES[phase-1].rescued;
+}
+
+function getDuelPhaseSettings(phase=duelPhase) {
+  const base=DUEL_PHASES[phase-1];
+  return gameMode==='online'
+    ? { spawnEvery:base.spawnEvery+0.7, catapultEvery:base.catapultEvery+12 }
+    : base;
+}
+
+function getSiegeDamage(baseDamage) {
+  return Math.ceil(baseDamage*(gameMode==='online'?0.72:1));
+}
+
 function startNextDuelPhase(phase) {
   duelPhase=Math.min(DUEL_PHASES.length,phase);
   currentWave=duelPhase; duelPhaseSaved=0; waveKnightsSaved=0; waveKnightsLost=0;
-  spawnTimer=DUEL_PHASES[duelPhase-1].spawnEvery;
-  duelCatapultTimer=Math.min(duelCatapultTimer,DUEL_PHASES[duelPhase-1].catapultEvery);
+  const phaseSettings=getDuelPhaseSettings(duelPhase);
+  spawnTimer=phaseSettings.spawnEvery;
+  duelCatapultTimer=Math.min(duelCatapultTimer,phaseSettings.catapultEvery);
   vsTimeLeft=Math.max(0,120-(duelPhase-1)*30);
   duelPhasePopup=null; duelPendingNextPhase=0;
   gameState='play';
@@ -360,7 +377,7 @@ function continueDuelPhase() {
   onlinePhaseLocalReady=true;
   sendOnlineData({type:'duel_phase_ready',phase:duelPhase});
   if(onlinePhaseRemoteReady&&onlineRole==='defender') {
-    onlinePhaseStartAt=Date.now()+1400;
+    onlinePhaseStartAt=Date.now()+2800;
     sendOnlineData({type:'duel_phase_start',phase:duelPendingNextPhase,startAt:onlinePhaseStartAt});
   }
   scheduleNextOnlineDuelPhase();
@@ -938,7 +955,7 @@ function handleOnlineMessage(data, isHost) {
   if(data.type==='duel_phase_ready'&&gameMode==='online'&&gameState==='phaseResult'&&Number(data.phase)===duelPhase){
     onlinePhaseRemoteReady=true;
     if(onlineRole==='defender'&&onlinePhaseLocalReady&&!onlinePhaseStartAt){
-      onlinePhaseStartAt=Date.now()+1400;
+      onlinePhaseStartAt=Date.now()+2800;
       sendOnlineData({type:'duel_phase_start',phase:duelPendingNextPhase,startAt:onlinePhaseStartAt});
     }
     scheduleNextOnlineDuelPhase();
@@ -1074,14 +1091,14 @@ function startGame(mode) {
   attackerScore = 0;
   duelPhase = 1; duelPhaseSaved = 0; duelPhaseWinners=[null,null,null,null]; duelPhasePopup=null; duelPendingNextPhase=0;
   onlinePhaseLocalReady=false; onlinePhaseRemoteReady=false; onlinePhaseStarting=false; onlinePhaseStartAt=0;
-  duelCatapultTimer = DUEL_PHASES[0].catapultEvery * 0.6;
+  duelCatapultTimer = getDuelPhaseSettings(1).catapultEvery * 0.6;
   duelFinishReason = '';
   onlineRematchLocalReady = false; onlineRematchRemoteReady = false;
   onlineRematchStarting = false; onlineRematchStartAt = 0;
   gameOverReason = '';
   // Standard Keep Integrity: 100 HP
-  maxWallHP = 100;
-  wallHP = 100;
+  maxWallHP = mode==='online'?120:100;
+  wallHP = maxWallHP;
   score = 0; combo = 0; maxCombo = 0;
   knightsSaved = 0; knightsLost = 0;
   waveKnightsSaved = 0; waveKnightsLost = 0;
@@ -1145,7 +1162,7 @@ function spawnKnight(forceCursed=false, forceBerserker=false) {
   }
 
   const lifeScale = arch.heavy ? 1.3 : arch.cursed ? 0.75 : arch.rage ? 0.9 : 1.0;
-  const baseLife = triage.life * perks.lifeMult * lifeScale;
+  const baseLife = triage.life * perks.lifeMult * lifeScale * (gameMode==='online'?1.25:1);
   const knight = {
     id: Math.random().toString(36).substring(2,9),
     type: triage, arch,
@@ -1181,7 +1198,7 @@ function handleKnightDeath(knight, bed=null) {
     addFloatingText(360,400,'🔥 PHOENIX DRAUGHT ACTIVATES!','#ff9800',28);
     playChord([880,1174,1568],'sine',0.5,0.18);
   } else if (skills.shield.activeTime<=0) {
-    wallHP = Math.max(0, wallHP - dmg);
+    wallHP = Math.max(0, wallHP - getSiegeDamage(dmg));
   }
 
   screenShake=20; vibrate(70); playBoom();
@@ -1295,8 +1312,9 @@ function triggerAttackerSkill(key, fromRemote=false) {
   } else if (key==='ladderRush') {
     screenShake=16; playBoom();
     if (skills.shield.activeTime<=0) {
-      wallHP=Math.max(0,wallHP-sk.dmg);
-      addFloatingText(360,260,`-${sk.dmg} LADDER BREACH!`,'#ff1744',24);
+      const damage=getSiegeDamage(sk.dmg);
+      wallHP=Math.max(0,wallHP-damage);
+      addFloatingText(360,260,`-${damage} LADDER BREACH!`,'#ff1744',24);
       if(gameMode==='online') sendOnlineData({type:'wallHP',v:wallHP});
       if (wallHP<=0) finishDuel('attacker','The keep wall was breached.');
     } else {
@@ -1310,8 +1328,9 @@ function triggerAttackerSkill(key, fromRemote=false) {
     // Massive direct wall damage + 3 rocks
     screenShake=24; playBoom();
     if (skills.shield.activeTime<=0) {
-      wallHP=Math.max(0,wallHP-sk.dmg);
-      addFloatingText(360,280,`-${sk.dmg} SIEGE TOWER CRUSHES!`,'#ff1744',28);
+      const damage=getSiegeDamage(sk.dmg);
+      wallHP=Math.max(0,wallHP-damage);
+      addFloatingText(360,280,`-${damage} SIEGE TOWER CRUSHES!`,'#ff1744',28);
       if(gameMode==='online') sendOnlineData({type:'wallHP',v:wallHP});
     } else {
       addFloatingText(360,280,'🛡️ SIEGE TOWER BLOCKED!','#ffd875',26);
@@ -1419,7 +1438,7 @@ function update(dt) {
       const matchReason=defenderRounds===attackerRounds
         ? `Tied ${defenderRounds}–${attackerRounds}; ${winner==='defender'?'defender':'attacker'} wins the wall HP tiebreak.`
         : `${winner==='defender'?'Defender':'Attacker'} won ${Math.max(defenderRounds,attackerRounds)} of 4 phases.`;
-      const reason=`Phase 4: ${duelPhaseWinners[3]} wins (${duelPhaseSaved}/10). ${matchReason}`;
+      const reason=`Phase 4: ${duelPhaseWinners[3]} wins (${duelPhaseSaved}/${getDuelPhaseTarget(4)}). ${matchReason}`;
       finishDuel(winner,reason);
       return;
     }
@@ -1455,7 +1474,7 @@ function update(dt) {
   if(spawnTimer<=0){
     if(gameMode==='vs'||gameMode==='online'){
       if(queueKnights.length<7) spawnKnight();
-      spawnTimer=DUEL_PHASES[duelPhase-1].spawnEvery;
+      spawnTimer=getDuelPhaseSettings(duelPhase).spawnEvery;
     } else if(waveSpawned<wd.knights){
       spawnKnight();
       spawnTimer=wd.rate;
@@ -1472,7 +1491,7 @@ function update(dt) {
     duelCatapultTimer-=dt;
     if(duelCatapultTimer<=0){
       spawnCatapultRock(duelPhase>=4);
-      duelCatapultTimer=DUEL_PHASES[duelPhase-1].catapultEvery;
+      duelCatapultTimer=getDuelPhaseSettings(duelPhase).catapultEvery;
     }
   }
 
@@ -1497,8 +1516,9 @@ function update(dt) {
         addFloatingText(rock.targetX,rock.targetY-20,'🛡️ BLOCKED!','#ffd875',22); playTone(300,'triangle',0.2,0.1);
       } else {
         const rockDmg=rock.size>24?18:14;
-        wallHP=Math.max(0,wallHP-rockDmg);
-        addFloatingText(rock.targetX,rock.targetY-20,`-${rockDmg} CATAPULT!`,'#ff5252',20);
+        const damage=getSiegeDamage(rockDmg);
+        wallHP=Math.max(0,wallHP-damage);
+        addFloatingText(rock.targetX,rock.targetY-20,`-${damage} CATAPULT!`,'#ff5252',20);
         if(gameMode==='online') sendOnlineData({type:'wallHP',v:wallHP});
         if(wallHP<=0){ if(gameMode==='vs'||gameMode==='online') finishDuel('attacker','The keep wall was breached.'); else triggerGameOver(); }
       }
@@ -1847,7 +1867,7 @@ function drawLocalDuelSplit(){
   ctx.fillStyle='#ff8a80'; ctx.font='900 21px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='middle';
   ctx.fillText('👑 ATTACKER — BREAK THE KEEP',34,39);
   ctx.fillStyle='#ffd875'; ctx.font='bold 13px Georgia,serif'; ctx.textAlign='right';
-  ctx.fillText(`P${duelPhase} • S${duelPhaseSaved}/10 • D${duelPhaseWinners.filter(w=>w==='defender').length}-A${duelPhaseWinners.filter(w=>w==='attacker').length} • ${Math.ceil(getDuelPhaseTimeLeft())}s`,565,40);
+  ctx.fillText(`P${duelPhase} • S${duelPhaseSaved}/${getDuelPhaseTarget()} • D${duelPhaseWinners.filter(w=>w==='defender').length}-A${duelPhaseWinners.filter(w=>w==='attacker').length} • ${Math.ceil(getDuelPhaseTimeLeft())}s`,565,40);
   ctx.fillStyle=soundOn?'#2e7d32':'#c62828'; roundRect(ctx,585,23,42,34,8); ctx.fill();
   ctx.fillStyle='#fff'; ctx.font='15px sans-serif'; ctx.textAlign='center'; ctx.fillText(soundOn?'🔊':'🔇',606,40);
   ctx.fillStyle='#37474f'; roundRect(ctx,642,23,42,34,8); ctx.fill();
@@ -1856,7 +1876,7 @@ function drawLocalDuelSplit(){
   ctx.fillStyle='#310e12'; roundRect(ctx,34,62,648,14,7); ctx.fill();
   ctx.fillStyle=ratio>0.4?'#ff5252':'#ff1744'; roundRect(ctx,34,62,648*ratio,14,7); ctx.fill();
   ctx.fillStyle='#ff8a80'; ctx.font='bold 12px Georgia,serif'; ctx.textAlign='center';
-  ctx.fillText(`SAVE 10 THIS PHASE • WALL ${Math.ceil(wallHP)} HP • TAP A READY SIEGE WEAPON`,360,118);
+  ctx.fillText(`DEFENDER TARGET ${getDuelPhaseTarget()} • WALL ${Math.ceil(wallHP)} HP • TAP A READY SIEGE WEAPON`,360,118);
   const cards=[
     ['catapult',30,140],['arrowVolley',375,140],
     ['ladderRush',30,280],['plagueBomb',375,280],
@@ -2057,7 +2077,7 @@ function drawHUD(){
     ? (infiniteMode
         ? `♾️ ENDLESS • Wave ${currentWave} • Saved: ${waveKnightsSaved}/${wd.knights} (Need ${soloTarget.saved}, Wall ${soloTarget.wall}+)`
         : `Solo • Wave ${currentWave}/20 • Saved: ${waveKnightsSaved}/${wd.knights} (Need ${soloTarget.saved}, Wall ${soloTarget.wall}+)`)
-    : `${gameMode==='online'?'Online':'1v1'} • Phase ${duelPhase}/4 • Saves ${duelPhaseSaved}/10 • Rounds D${duelPhaseWinners.filter(w=>w==='defender').length}-A${duelPhaseWinners.filter(w=>w==='attacker').length} • Wall ${Math.ceil(wallHP)} • ${Math.ceil(getDuelPhaseTimeLeft())}s`;
+    : `${gameMode==='online'?'Online':'1v1'} • Phase ${duelPhase}/4 • Saves ${duelPhaseSaved}/${getDuelPhaseTarget()} • Rounds D${duelPhaseWinners.filter(w=>w==='defender').length}-A${duelPhaseWinners.filter(w=>w==='attacker').length} • Wall ${Math.ceil(wallHP)} • ${Math.ceil(getDuelPhaseTimeLeft())}s`;
   ctx.fillStyle='#90a4ae'; ctx.font='11px Georgia,serif'; ctx.fillText(waveLabel,36,68,535);
 
   // Sound button
@@ -2159,7 +2179,7 @@ function drawHomeScreen(){
   ctx.fillStyle='rgba(212,175,55,0.18)'; roundRect(ctx,230,170,260,28,14); ctx.fill();
   ctx.strokeStyle='#d4af37'; ctx.lineWidth=1; ctx.stroke();
   ctx.fillStyle='#ffd875'; ctx.font='bold 12px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillText('v4.4 • PHASE-BY-PHASE DUELS',360,184);
+  ctx.fillText('v4.5 • ONLINE DEFENDER BALANCE',360,184);
 
   ctx.fillStyle='#ffd875'; ctx.font='900 46px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
   ctx.fillText('SIEGE ROUNDS',360,245);
@@ -2220,9 +2240,9 @@ function drawModeHelpScreen(){
     { title:'How you win', lines:['Survive all 20 campaign waves to save the keep.', 'Finish the campaign to unlock Endless mode.'] }
   ] : [
     { title:online?'Who plays which role':'Two roles on one phone', lines:online?['Room host is the defender. The person joining with the code is the attacker.']:['Attacker plays in the upper half; defender plays in the lower infirmary.', 'Both players act at the same time on the split screen.'] },
-    { title:'Defender: protect 10 knights', lines:['Drag each knight to a bed of the same colour, then tap rapidly to heal.', 'Save 10 knights within 30 seconds to win that phase.'] },
-    { title:'Attacker: break the wall', lines:['Tap any READY siege weapon card; use it again when its cooldown ends.', 'If the defender saves fewer than 10 this phase, the attacker wins it.', 'Break the wall to 0 HP at any time for an immediate match win.'] },
-    { title:'Four phases decide the duel', lines:['Each phase lasts 30 seconds. A popup names its winner and running score.', 'After Phase 4, most phase wins takes the match. At 2–2, wall HP', 'breaks the tie: 50+ HP means defender wins; below 50 means attacker.', online?'Both players tap Continue on each phase popup.':'Tap Continue after each phase popup.' ] }
+    { title:online?'Defender: protect 6 knights':'Defender: protect 10 knights', lines:['Drag a wounded knight to the bed with the same colour.', 'Tap that occupied bed rapidly to heal the knight.', `Save ${online?6:10} within 30 seconds to win this phase.`] },
+    { title:'Attacker: damage the wall', lines:['Tap a red siege weapon card marked READY. When its timer ends, tap it again.', 'Save fewer than the phase target and attacker wins that phase.', 'Break the wall to 0 HP at any time to win the whole match.'] },
+    { title:'Four phases decide the duel', lines:['Each phase lasts 30 seconds. A popup names its winner and running score.', 'After Phase 4, most phase wins takes the match. At 2–2, wall HP', `breaks the tie: ${online?'60':'50'}+ HP means defender wins; below that means attacker.`, online?'Both players tap Continue on each phase popup.':'Tap Continue after each phase popup.' ] }
   ];
 
   ctx.fillStyle='rgba(6,9,14,0.96)'; ctx.fillRect(0,0,W,H);
@@ -2545,9 +2565,9 @@ function drawHowToPlayScreen(){
       badgeCol: '#e040fb',
       lines: [
         '• Solo: save the quota and keep enough wall HP each wave.',
-        '• Duel: 4 phases, 30s each. Save 10 knights to win a phase.',
-        '• Fewer than 10: attacker wins that phase. Wall at 0: attacker wins the match.',
-        '• After Phase 4, most phase wins takes the match. At 2–2, 50+ wall HP wins for defender.',
+        '• Online: save 6 each 30s phase; local duel needs 10.',
+        '• Save less and attacker wins that phase. Wall at 0 ends online match.',
+        '• After 4 phases, most wins takes match. At 2–2, 60+ wall HP wins for defender.',
         '• Online: both tap Continue after every phase popup and the match.'
       ]
     }
@@ -2995,7 +3015,7 @@ function forceUpdateGame() {
 // Service Worker with auto-update
 if('serviceWorker' in navigator && location.protocol.startsWith('http')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('./sw.js?v=16').then(reg => {
+    navigator.serviceWorker.register('./sw.js?v=18').then(reg => {
       reg.update();
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing;
