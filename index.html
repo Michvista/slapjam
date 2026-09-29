@@ -185,10 +185,10 @@ function getSoloWaveTargets(waveNum=currentWave) {
 }
 
 const DUEL_PHASES = [
-  { name:'OUTER SALLY', rescued:3, wall:70, spawnEvery:2.0, catapultEvery:28 },
-  { name:'GATE ASSAULT', rescued:4, wall:55, spawnEvery:1.8, catapultEvery:22 },
-  { name:'INNER BAILEY', rescued:5, wall:40, spawnEvery:1.55, catapultEvery:16 },
-  { name:'FINAL BREACH', rescued:6, wall:25, spawnEvery:1.3, catapultEvery:12 }
+  { name:'OUTER SALLY', rescued:2, wall:60, spawnEvery:2.0, catapultEvery:28 },
+  { name:'GATE ASSAULT', rescued:3, wall:45, spawnEvery:1.8, catapultEvery:22 },
+  { name:'INNER BAILEY', rescued:4, wall:30, spawnEvery:1.55, catapultEvery:16 },
+  { name:'FINAL BREACH', rescued:5, wall:15, spawnEvery:1.3, catapultEvery:12 }
 ];
 
 let infiniteMode = false; // unlocks after clearing wave 20
@@ -199,6 +199,7 @@ let infiniteMode = false; // unlocks after clearing wave 20
 let gameState = 'home'; // home | howtoplay | roleselect | online | play | pause | reward | victory | gameover
 let gameMode  = 'solo'; // solo | vs | online
 let playerRole = 'defender'; // which role the LOCAL player has in online mode: attacker | defender
+let modeHelpMode = 'solo';
 
 // For 1v1 local & online
 let vsTimeLeft = 120;
@@ -1331,10 +1332,10 @@ function update(dt) {
     const targetPhase=Math.min(DUEL_PHASES.length,Math.floor((120-vsTimeLeft)/30)+1);
     if(targetPhase>duelPhase){
       const cleared=DUEL_PHASES[duelPhase-1];
-      if(!(gameMode==='online'&&playerRole==='attacker')){
-        if(duelPhaseSaved<cleared.rescued){ finishDuel('attacker',`${cleared.name} objective failed: rescued ${duelPhaseSaved}/${cleared.rescued}.`); return; }
-        if(wallHP<cleared.wall){ finishDuel('attacker',`${cleared.name} breached the wall below ${cleared.wall} HP.`); return; }
-      }
+      // Earlier checkpoint misses are setbacks, not instant match losses.
+      // The defender gets the full two minutes to recover for the final stand.
+      const checkpointHeld=duelPhaseSaved>=cleared.rescued&&wallHP>=cleared.wall;
+      addFloatingText(360,520,checkpointHeld?'CHECKPOINT HELD — KEEP FIGHTING!':'CHECKPOINT MISSED — THE SIEGE CONTINUES!','#ffd875',20);
       duelPhase=targetPhase; currentWave=duelPhase; duelPhaseSaved=0; waveKnightsSaved=0; waveKnightsLost=0;
       spawnTimer=DUEL_PHASES[duelPhase-1].spawnEvery;
       duelCatapultTimer=Math.min(duelCatapultTimer,DUEL_PHASES[duelPhase-1].catapultEvery);
@@ -1571,6 +1572,7 @@ function draw() {
   if(gameState==='home')         drawHomeScreen();
   else if(gameState==='roleselect') drawRoleSelectScreen();
   else if(gameState==='online')  drawOnlineScreen();
+  else if(gameState==='modehelp') drawModeHelpScreen();
   else if(gameState==='howtoplay') drawHowToPlayScreen();
   else if(gameState==='pause')   drawPauseScreen();
   else if(gameState==='reward')  drawRewardScreen();
@@ -2064,7 +2066,7 @@ function drawHomeScreen(){
   ctx.fillStyle='rgba(212,175,55,0.18)'; roundRect(ctx,230,170,260,28,14); ctx.fill();
   ctx.strokeStyle='#d4af37'; ctx.lineWidth=1; ctx.stroke();
   ctx.fillStyle='#ffd875'; ctx.font='bold 12px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillText('v4.1 • ASSAULT PHASES UPDATE',360,184);
+  ctx.fillText('v4.2 • DUEL RULES & MODE GUIDES',360,184);
 
   ctx.fillStyle='#ffd875'; ctx.font='900 46px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
   ctx.fillText('SIEGE ROUNDS',360,245);
@@ -2113,6 +2115,45 @@ function drawHomeScreen(){
   ctx.fillStyle='#78909c'; ctx.font='11px Georgia,serif'; ctx.textBaseline='alphabetic';
   ctx.fillText('Slapjam AI Jam Entry • Built with HTML5 Canvas',360,885);
 
+}
+
+function drawModeHelpScreen(){
+  const online=modeHelpMode==='online';
+  const local=modeHelpMode==='local';
+  const title=online?'Online duel':local?'Local duel':'Solo defense';
+  const cards=modeHelpMode==='solo' ? [
+    { title:'Treat the wounded', lines:['Drag a knight to the bed with the same colour, then tap the bed rapidly.', 'Purify cursed knights first. A healed knight returns to the ramparts.'] },
+    { title:'Hold the castle', lines:['Meet each wave’s rescue quota and keep the wall above its HP target.', 'Lost patients and siege attacks damage the wall. Use your powers wisely.'] },
+    { title:'How you win', lines:['Survive all 20 campaign waves to save the keep.', 'Finish the campaign to unlock Endless mode.'] }
+  ] : [
+    { title:online?'Two phones, two roles':'One phone, two roles', lines:online?['Defender hosts the room; attacker joins with the invite code.', 'Defender treats knights. Attacker uses siege weapons to break the wall.']:['Attacker uses the top half; defender treats knights in the lower ward.', 'Match knight colours to beds, then tap occupied beds rapidly to heal.'] },
+    { title:'Four checkpoints, one duel', lines:['The match is 2 minutes: four 30-second phases. Save 2 / 3 / 4 / 5.', 'Wall targets are 60 / 45 / 30 / 15 HP. Missing an early target', 'does not end the match; keep fighting through the next phase.'] },
+    { title:'Final result', lines:['Defender wins after 2 minutes with 5 saves in the final phase', 'and at least 15 wall HP. Attacker wins if the wall reaches 0 HP,', 'or the defender misses either final requirement. One duel, not five matches.'] }
+  ];
+
+  ctx.fillStyle='rgba(6,9,14,0.96)'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#141e2b'; roundRect(ctx,48,135,624,1010,18); ctx.fill();
+  ctx.strokeStyle=online?'#00e676':local?'#ff8a80':'#d4af37'; ctx.lineWidth=3; ctx.stroke();
+  ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  ctx.fillStyle='#ffd875'; ctx.font='900 38px Georgia,serif'; ctx.fillText(`${title} — how to play`,360,205);
+  ctx.fillStyle='#a0b3c6'; ctx.font='15px Georgia,serif';
+  ctx.fillText(local?'Pass the phone between turns or play together on the split screen.':online?'Read this before creating or joining a room.':'Triage quickly to keep your wall standing.',360,239);
+
+  cards.forEach((card,i)=>{
+    const y=280+i*218;
+    ctx.fillStyle='#1c2838'; roundRect(ctx,78,y,564,190,13); ctx.fill();
+    ctx.strokeStyle=i===2?(online?'#00e676':'#d4af37'):'#45576b'; ctx.lineWidth=1.5; ctx.stroke();
+    ctx.textAlign='left'; ctx.fillStyle=i===2?'#ffd875':'#cfd8dc'; ctx.font='900 19px Georgia,serif'; ctx.fillText(card.title,103,y+38);
+    ctx.fillStyle='#cfd8dc'; ctx.font='15px Georgia,serif';
+    card.lines.forEach((line,j)=>ctx.fillText(line,103,y+76+j*28));
+  });
+
+  ctx.textAlign='center';
+  ctx.fillStyle=online?'#00c853':local?'#d4af37':'#d4af37'; roundRect(ctx,118,955,484,70,13); ctx.fill();
+  ctx.fillStyle='#071018'; ctx.font='900 21px Georgia,serif'; ctx.textBaseline='middle';
+  ctx.fillText(online?'OPEN ONLINE LOBBY':local?'START LOCAL DUEL':'START SOLO DEFENSE',360,990);
+  ctx.fillStyle='#8195a4'; ctx.font='15px Georgia,serif'; ctx.textBaseline='alphabetic';
+  ctx.fillText('BACK',360,1084);
 }
 
 // Role selection for 1v1 local
@@ -2371,9 +2412,9 @@ function drawHowToPlayScreen(){
       lines: [
         '• Solo: save the quota and keep enough wall HP each wave.',
         '• Duel: 4 phases × 30s. Match knight colors; tap beds to heal.',
-        '• Save 3 / 4 / 5 / 6; keep at least 70 / 55 / 40 / 25 wall HP.',
-        '• Defender wins after Phase 4 if 6 are saved and wall has 25+ HP.',
-        '• Miss a checkpoint or hit 0 HP? Attacker wins. Both Continue to rematch.'
+        '• Save 2 / 3 / 4 / 5; wall checkpoints are 60 / 45 / 30 / 15 HP.',
+        '• Defender wins after 2 min with 5 final-phase saves and 15+ wall HP.',
+        '• Miss an early target and keep fighting. Wall 0 or failed final = attacker.'
       ]
     }
   ];
@@ -2488,12 +2529,24 @@ canvas.addEventListener('pointerdown', e=>{
 
   // HOME SCREEN
   if(gameState==='home'){
-    if(pt.x>100&&pt.x<620&&pt.y>415&&pt.y<489){ startGame('solo'); return; }
-    if(pt.x>100&&pt.x<620&&pt.y>505&&pt.y<575){ playerRole='both'; startGame('vs'); return; }
-    if(pt.x>100&&pt.x<620&&pt.y>590&&pt.y<660){ gameState='online'; onlineState='idle'; onlineStatus=''; roomCodeInput=''; roomCodeInputActive=false; playTone(440,'triangle',0.1,0.08); return; }
+    if(pt.x>100&&pt.x<620&&pt.y>415&&pt.y<489){ modeHelpMode='solo'; gameState='modehelp'; return; }
+    if(pt.x>100&&pt.x<620&&pt.y>505&&pt.y<575){ modeHelpMode='local'; gameState='modehelp'; return; }
+    if(pt.x>100&&pt.x<620&&pt.y>590&&pt.y<660){ modeHelpMode='online'; gameState='modehelp'; return; }
     if(pt.x>100&&pt.x<620&&pt.y>675&&pt.y<731){ gameState='howtoplay'; playTone(440,'triangle',0.1,0.08); return; }
     if(pt.x>160&&pt.x<340&&pt.y>795&&pt.y<839){ soundOn=!soundOn; localStorage.setItem('sr_sound',soundOn?'1':'0'); playTone(520,'sine',0.1,0.1); return; }
     if(pt.x>360&&pt.x<560&&pt.y>795&&pt.y<839){ forceUpdateGame(); return; }
+    return;
+  }
+
+  // Mode-specific instructions shown before play or room setup
+  if(gameState==='modehelp'){
+    if(pt.x>118&&pt.x<602&&pt.y>955&&pt.y<1025){
+      if(modeHelpMode==='solo') startGame('solo');
+      else if(modeHelpMode==='local'){ playerRole='both'; startGame('vs'); }
+      else { gameState='online'; onlineState='idle'; onlineStatus=''; roomCodeInput=''; roomCodeInputActive=false; playTone(440,'triangle',0.1,0.08); }
+      return;
+    }
+    if(pt.y>1040&&pt.y<1110){ gameState='home'; return; }
     return;
   }
 
@@ -2802,7 +2855,7 @@ function forceUpdateGame() {
 // Service Worker with auto-update
 if('serviceWorker' in navigator && location.protocol.startsWith('http')){
   window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('./sw.js?v=14').then(reg => {
+    navigator.serviceWorker.register('./sw.js?v=15').then(reg => {
       reg.update();
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing;
