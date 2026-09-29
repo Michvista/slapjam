@@ -198,27 +198,31 @@ let attackerSkills = {
   assassin:    { name:'Assassin',      icon:'🗡️', cooldown:22.0, timer:0, dmg:0  }
 };
 
-// Defender skills (4 total — defender-favored: "I MUST WIN O")
+// Defender skills (4 total — defense-first theme)
 let skills = {
-  elixir:  { name:'Miracle Elixir',  icon:'🧪', cooldown:18, timer:0 },          // buffed from 25→18
-  shield:  { name:'Gate Barricade',  icon:'🛡️', cooldown:32, timer:0, activeTime:0 }, // shield duration 9s
-  rally:   { name:'Rally!',          icon:'🔔', cooldown:28, timer:0 },           // NEW: extends all bleedout timers
-  fortress:{ name:'Stone Fortress',  icon:'🏰', cooldown:45, timer:0 }            // NEW: instant +25 wall HP repair
+  elixir:  { name:'Miracle Elixir',  icon:'🧪', cooldown:14, timer:0 },          // Instantly boosts all beds + wall heal
+  shield:  { name:'Divine Aegis',    icon:'🛡️', cooldown:28, timer:0, activeTime:0 }, // 12s projectile immunity barrier
+  rally:   { name:'War Rally',       icon:'🔔', cooldown:22, timer:0 },           // Restores 50% bleedout to ALL knights
+  fortress:{ name:'Iron Bastion',    icon:'🏰', cooldown:38, timer:0 }            // +30 Wall HP + brief catapult immunity
 };
 
 // Relics
 let playerRelics = [];
-let perks = { healMult:1.0, lifeMult:1.0, wallArmor:0, autoHeal:0, comboBonus:1.0 };
+let perks = { healMult:1.0, lifeMult:1.0, wallArmor:0, autoHeal:0, comboBonus:1.0, doubleTap:false, phoenix:false, damageMult:1.0, wallRegen:0 };
 
 const ALL_RELICS = [
-  { id:'salve',    name:'ROYAL FIELD SALVE',   desc:'+55% Faster Bandage & Healing Speed', icon:'🍯', apply: p=>{ p.healMult+=0.55; } },
-  { id:'bastion',  name:'GRANITE BASTION',      desc:'+30 Wall Max HP & +15 HP Repair/Wave', icon:'🧱', apply:(p,g)=>{ g.maxWallHP+=30; g.wallHP=Math.min(g.maxWallHP,g.wallHP+30); p.wallArmor+=15; } },
-  { id:'tincture', name:'HERBAL TINCTURE',      desc:'+45% Patient Bleedout Survival Timers', icon:'🌿', apply: p=>{ p.lifeMult+=0.45; } },
-  { id:'order',    name:'APOTHECARY ORDER',     desc:'Beds auto-treat patients over time', icon:'✨', apply: p=>{ p.autoHeal+=0.45; } },
-  { id:'horn',     name:'WARHORN OF VALOR',     desc:'Combos grant +60% extra wall repair & pts', icon:'🎺', apply: p=>{ p.comboBonus+=0.6; } },
-  { id:'sanctum',  name:'HEALING SANCTUM',      desc:'All beds gain 2nd tap-heal charge for free', icon:'🕍', apply: p=>{ p.doubleTap=true; } },
-  { id:'phoenix',  name:'PHOENIX DRAUGHT',      desc:'First time wall reaches 0, restore 25 HP once per wave', icon:'🔥', apply: p=>{ p.phoenix=true; } },
-  { id:'amulet',   name:'MEDIC\'S AMULET',      desc:'Killed knights deal 40% less wall damage', icon:'🔮', apply: p=>{ p.damageMult=0.6; } }
+  { id:'salve',    name:'ROYAL FIELD SALVE',   desc:'+65% Faster Bandage & Healing Speed', icon:'🍯', apply: p=>{ p.healMult+=0.65; } },
+  { id:'bastion',  name:'GRANITE BASTION',      desc:'+40 maximum wall HP & +20 extra wall repair per wave', icon:'🧱', apply:p=>{ maxWallHP+=40; wallHP=Math.min(maxWallHP,wallHP+40); p.wallArmor+=20; } },
+  { id:'tincture', name:'HERBAL TINCTURE',      desc:'+60% Patient Bleedout Survival Time', icon:'🌿', apply: p=>{ p.lifeMult+=0.60; } },
+  { id:'order',    name:'APOTHECARY ORDER',     desc:'All beds auto-heal patients passively', icon:'✨', apply: p=>{ p.autoHeal+=0.55; } },
+  { id:'horn',     name:'WARHORN OF VALOR',     desc:'Combos grant +80% extra wall repair', icon:'🎺', apply: p=>{ p.comboBonus+=0.8; } },
+  { id:'sanctum',  name:'HEALING SANCTUM',      desc:'Each bed tap heals 50% extra progress', icon:'🕍', apply: p=>{ p.doubleTap=true; } },
+  { id:'phoenix',  name:'PHOENIX DRAUGHT',      desc:'Wall at 0? Restore 35 HP once per wave!', icon:'🔥', apply: p=>{ p.phoenix=true; } },
+  { id:'amulet',   name:'MEDIC\'S AMULET',      desc:'Killed knights deal 50% less wall damage', icon:'🔮', apply: p=>{ p.damageMult=0.5; } },
+  { id:'regen',    name:'CELESTIAL SPRING',     desc:'Wall passively regenerates +1 HP every 5s', icon:'💧', apply: p=>{ p.wallRegen=0.2; } },
+  { id:'purifier', name:'HOLY PURIFIER',        desc:'Plague knights purify instantly on bed placement', icon:'⚗️', apply: p=>{ p.autoPurify=true; } },
+  { id:'bulwark',  name:'DEFENDERS\' BULWARK',  desc:'+20 maximum wall HP and an extra +18 repair each wave', icon:'🏯', apply:()=>{ maxWallHP+=20; wallHP=Math.min(maxWallHP,wallHP+20); } },
+  { id:'swift',    name:'SWIFT HANDS',          desc:'Heals go 35% faster when multiple beds occupied', icon:'⚡', apply: p=>{ p.swiftHands=true; } }
 ];
 let rewardOptions = [];
 
@@ -256,11 +260,13 @@ let roomCodeInputActive = false;
 let onlineStatus = '';
 let copyFeedback = '';
 let copyFeedbackTimer = 0;
-
+let beaconInterval = null;
+let currentClientId = '';
+let brokerAttempt = 0;
+let handshakeTimer = null;
 const MQTT_BROKERS = [
-  { host: 'broker.emqx.io', port: 8084, path: '/mqtt' },
-  { host: 'broker.hivemq.com', port: 8884, path: '/mqtt' },
-  { host: 'test.mosquitto.org', port: 8081, path: '/mqtt' }
+  { host:'broker.emqx.io', port:8084, path:'/mqtt' },
+  { host:'broker.hivemq.com', port:8884, path:'/mqtt' }
 ];
 
 function generateRoomCode() {
@@ -271,6 +277,8 @@ function generateRoomCode() {
 }
 
 function disconnectMQTT() {
+  if (beaconInterval) { clearInterval(beaconInterval); beaconInterval = null; }
+  if (handshakeTimer) { clearTimeout(handshakeTimer); handshakeTimer = null; }
   if (mqttClient) {
     try { mqttClient.disconnect(); } catch(e){}
     mqttClient = null;
@@ -279,12 +287,13 @@ function disconnectMQTT() {
 
 function initHostRoom() {
   disconnectMQTT();
+  brokerAttempt = 0;
   roomCode = generateRoomCode();
   onlineState = 'hosting';
   onlineRole = 'defender';
   playerRole = 'defender';
   onlineStatus = '✅ ROOM CREATED: ' + roomCode + '\nWaiting for opponent to connect...';
-  connectMQTTRoom(roomCode, true, 0);
+  connectMQTTRoom(roomCode, true);
 }
 
 function joinHostRoom(code) {
@@ -294,12 +303,13 @@ function joinHostRoom(code) {
     return;
   }
   disconnectMQTT();
+  brokerAttempt = 0;
   roomCode = clean;
   onlineState = 'joining';
   onlineRole = 'attacker';
   playerRole = 'attacker';
   onlineStatus = 'Connecting to Room ' + roomCode + '...';
-  connectMQTTRoom(roomCode, false, 0);
+  connectMQTTRoom(roomCode, false);
 }
 
 function connectMQTTRoom(code, isHost, brokerIdx = 0) {
@@ -309,14 +319,24 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
     return;
   }
 
-  const broker = MQTT_BROKERS[brokerIdx % MQTT_BROKERS.length];
-  const clientId = 'sr_' + (isHost ? 'h_' : 'g_') + Math.random().toString(36).substring(2, 9);
+  if (beaconInterval) { clearInterval(beaconInterval); beaconInterval = null; }
+  brokerAttempt = brokerIdx;
 
+  currentClientId = 'sr_' + (isHost ? 'host_' : 'guest_') + Math.random().toString(36).substring(2, 9);
+  const topic = 'sr_jam2026_room_' + code;
+
+  let brokerConnected = false;
   try {
-    mqttClient = new Paho.MQTT.Client(broker.host, broker.port, broker.path, clientId);
+    const broker = MQTT_BROKERS[brokerIdx];
+    mqttClient = new Paho.MQTT.Client(broker.host, broker.port, broker.path, currentClientId);
 
     mqttClient.onConnectionLost = (responseObject) => {
       if (responseObject.errorCode !== 0) {
+        if (!brokerConnected && brokerIdx + 1 < MQTT_BROKERS.length) {
+          onlineStatus = 'Broker connection lost. Trying backup...';
+          setTimeout(() => connectMQTTRoom(code, isHost, brokerIdx + 1), 250);
+          return;
+        }
         if (gameState === 'play' && gameMode === 'online') {
           addFloatingText(360, 500, '⚠️ CONNECTION INTERRUPTED', '#ff5252', 24);
         }
@@ -326,95 +346,121 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
     mqttClient.onMessageArrived = (message) => {
       try {
         const payload = JSON.parse(message.payloadString);
-        handleOnlineMessage(payload, message.destinationName, isHost);
+        if (payload.senderId === currentClientId) return;
+        handleOnlineMessage(payload, isHost);
       } catch(e){}
     };
 
     mqttClient.connect({
       useSSL: true,
-      timeout: 8,
+      timeout: 15,
       keepAliveInterval: 30,
       cleanSession: true,
       onSuccess: () => {
-        const topic = 'sr2026/room/' + code + '/#';
-        mqttClient.subscribe(topic, { qos: 1 });
+        brokerConnected = true;
+        mqttClient.subscribe(topic, { qos: 0 });
 
         if (isHost) {
-          onlineStatus = '✅ ROOM LIVE: ' + code + '\nWaiting for opponent to connect...';
+        onlineStatus = '✅ ROOM LIVE: ' + code + '\nWaiting for opponent to connect...';
+          // Send periodic host beacon
+          beaconInterval = setInterval(() => {
+            if (onlineState === 'connected') { clearInterval(beaconInterval); return; }
+            sendOnlineData({ type: 'host_beacon', code });
+          }, 500);
         } else {
-          onlineStatus = '⚡ Connected to room! Challenging host...';
-          // Send join handshake repeatedly to guarantee instant connection
-          let attempts = 0;
-          const pingInterval = setInterval(() => {
-            if (onlineState === 'connected' || attempts >= 5) {
-              clearInterval(pingInterval);
-              return;
-            }
+          onlineStatus = '⚡ Connected! Challenging Host in Room ' + code + '...';
+          // Send periodic join request until acknowledged
+          beaconInterval = setInterval(() => {
+            if (onlineState === 'connected') { clearInterval(beaconInterval); return; }
             sendOnlineData({ type: 'join_req', code });
-            attempts++;
-          }, 300);
+          }, 350);
+          handshakeTimer = setTimeout(() => {
+            if (onlineState === 'joining') {
+              if (beaconInterval) { clearInterval(beaconInterval); beaconInterval = null; }
+              onlineStatus = 'No host answered. Check the code, keep the host room open, then retry.';
+              onlineState = 'error';
+            }
+          }, 20000);
         }
       },
       onFailure: (err) => {
-        if (brokerIdx < MQTT_BROKERS.length - 1) {
-          onlineStatus = 'Connecting via backup network (' + (brokerIdx + 2) + ')...';
-          connectMQTTRoom(code, isHost, brokerIdx + 1);
+        if (brokerIdx + 1 < MQTT_BROKERS.length) {
+          onlineStatus = 'Broker ' + (brokerIdx + 1) + ' unavailable. Trying backup...';
+          setTimeout(() => connectMQTTRoom(code, isHost, brokerIdx + 1), 250);
         } else {
-          onlineStatus = 'Connection failed. Please check internet & retry.';
+          onlineStatus = 'Connection failed (' + (err.errorMessage || 'network unavailable') + '). Check both devices\' internet and retry.';
           onlineState = 'error';
         }
       }
     });
   } catch(e) {
-    onlineStatus = 'Network error: ' + e.message;
-    onlineState = 'error';
+    if (brokerIdx + 1 < MQTT_BROKERS.length) {
+      onlineStatus = 'Broker ' + (brokerIdx + 1) + ' unavailable. Trying backup...';
+      setTimeout(() => connectMQTTRoom(code, isHost, brokerIdx + 1), 250);
+    } else {
+      onlineStatus = 'Network error: ' + e.message;
+      onlineState = 'error';
+    }
   }
 }
 
 function sendOnlineData(data) {
   if (!mqttClient || !mqttClient.isConnected() || !roomCode) return;
   try {
-    const sender = (onlineRole === 'defender') ? 'host' : 'guest';
-    const topic = 'sr2026/room/' + roomCode + '/' + sender;
+    const topic = 'sr_jam2026_room_' + roomCode;
+    data.senderId = currentClientId;
+    data.room = roomCode;
     const msg = new Paho.MQTT.Message(JSON.stringify(data));
     msg.destinationName = topic;
-    msg.qos = 1;
+    msg.qos = 0;
     mqttClient.send(msg);
   } catch(e){}
 }
 
-function handleOnlineMessage(data, topic, isHost) {
+function handleOnlineMessage(data, isHost) {
   if (!data || !data.type) return;
-
-  // Prevent processing self-published messages
-  const mySender = isHost ? '/host' : '/guest';
-  if (topic && topic.endsWith(mySender)) return;
 
   // Guest requested to join host room
   if (data.type === 'join_req' && isHost) {
     sendOnlineData({ type: 'join_ack', code: roomCode });
     if (onlineState !== 'connected') {
+      if (handshakeTimer) { clearTimeout(handshakeTimer); handshakeTimer = null; }
       onlineState = 'connected';
+      if (beaconInterval) { clearInterval(beaconInterval); beaconInterval = null; }
       onlineStatus = '⚔️ ATTACKER CONNECTED!\nStarting duel...';
       playTone(580, 'triangle', 0.2, 0.15, 880);
       setTimeout(() => {
         playerRole = 'defender';
         startGame('online');
-      }, 800);
+      }, 700);
     }
     return;
   }
 
   // Host acknowledged guest request
   if (data.type === 'join_ack' && !isHost) {
+    sendOnlineData({ type: 'guest_ready', code: roomCode });
     if (onlineState !== 'connected') {
+      if (handshakeTimer) { clearTimeout(handshakeTimer); handshakeTimer = null; }
       onlineState = 'connected';
+      if (beaconInterval) { clearInterval(beaconInterval); beaconInterval = null; }
       onlineStatus = '⚔️ HOST ACCEPTED!\nStarting duel...';
       playTone(580, 'triangle', 0.2, 0.15, 880);
       setTimeout(() => {
         playerRole = 'attacker';
         startGame('online');
-      }, 800);
+      }, 700);
+    }
+    return;
+  }
+
+  // Guest ready ack received by host
+  if (data.type === 'guest_ready' && isHost) {
+    if (onlineState !== 'connected') {
+      onlineState = 'connected';
+      if (beaconInterval) { clearInterval(beaconInterval); beaconInterval = null; }
+      playerRole = 'defender';
+      startGame('online');
     }
     return;
   }
@@ -489,6 +535,7 @@ window.addEventListener('keydown', (e) => {
 function startGame(mode) {
   gameMode = mode;
   gameState = 'play';
+  if (mode === 'solo') playerRole = 'defender'; // solo is always defender view
   currentWave = 1;
   infiniteMode = false;
   // Standard Keep Integrity: 100 HP
@@ -501,7 +548,7 @@ function startGame(mode) {
   screenShake = 0; selectedQueueKnight = null;
   assassinActive = false; assassinTimer = 0;
   playerRelics = [];
-  perks = { healMult:1.0, lifeMult:1.0, wallArmor:0, autoHeal:0, comboBonus:1.0, doubleTap:false, phoenix:false, damageMult:1.0 };
+  perks = { healMult:1.0, lifeMult:1.0, wallArmor:0, autoHeal:0, comboBonus:1.0, doubleTap:false, phoenix:false, damageMult:1.0, wallRegen:0, autoPurify:false, swiftHands:false, phoenixUsed:false };
   skills.elixir.timer = 0;
   skills.shield.timer = 0; skills.shield.activeTime = 0;
   skills.rally.timer = 0;
@@ -587,7 +634,7 @@ function handleKnightDeath(knight, bed=null) {
   if (knight.arch===ARCHETYPES.BERSERKER) dmg=Math.round(dmg*1.5);
 
   // Phoenix relic: once per wave save at 0 HP
-  if (perks.phoenix && !perks.phoenixUsed) {
+  if (skills.shield.activeTime<=0 && perks.phoenix && !perks.phoenixUsed && dmg>=wallHP) {
     perks.phoenixUsed = true;
     wallHP = 25;
     addFloatingText(360,400,'🔥 PHOENIX DRAUGHT ACTIVATES!','#ff9800',28);
@@ -642,33 +689,37 @@ function activateElixir() {
   if (skills.elixir.timer>0) return;
   skills.elixir.timer=skills.elixir.cooldown; vibrate(50);
   playChord([659,880,1174],'sine',0.4,0.15);
-  beds.forEach(b=>{ if(b.patient){ b.treatProgress+=b.patient.type.healTime*0.65; b.patient.isPurified=true; createParticles(b.x,b.y,'#b388ff',20); } });
-  wallHP=Math.min(maxWallHP,wallHP+15);
-  addFloatingText(360,680,'🧪 MIRACLE ELIXIR!','#69f0ae',28);
+  beds.forEach(b=>{ if(b.patient){ b.treatProgress+=b.patient.type.healTime*0.80; b.patient.isPurified=true; createParticles(b.x,b.y,'#b388ff',25); } });
+  wallHP=Math.min(maxWallHP,wallHP+20);
+  addFloatingText(360,680,'🧪 MIRACLE ELIXIR! +20 WALL','#69f0ae',28);
   if(gameMode==='online') sendOnlineData({type:'wallHP',v:wallHP});
 }
 function activateShield() {
   if (skills.shield.timer>0) return;
-  skills.shield.timer=skills.shield.cooldown; skills.shield.activeTime=9.0; vibrate(50);
+  skills.shield.timer=skills.shield.cooldown; skills.shield.activeTime=12.0; vibrate(50);
   playTone(220,'triangle',0.5,0.2,440);
-  addFloatingText(360,260,'🛡️ BARRICADE! 9s IMMUNITY!','#ffd875',28);
+  addFloatingText(360,260,'🛡️ DIVINE AEGIS! 12s BARRIER!','#ffd875',28);
+  createParticles(360,300,'#ffd875',30);
 }
 function activateRally() {
   if (skills.rally.timer>0) return;
   skills.rally.timer=skills.rally.cooldown; vibrate(45);
-  playChord([440,554,659],'triangle',0.35,0.12);
-  // Extend all knights' bleedout time by 40%
-  queueKnights.forEach(k=>{ k.life=Math.min(k.maxLife, k.life+k.maxLife*0.40); });
-  beds.forEach(b=>{ if(b.patient){ b.patient.life=Math.min(b.patient.maxLife, b.patient.life+b.patient.maxLife*0.40); } });
-  addFloatingText(360,700,'🔔 RALLY! ALL TIMERS EXTENDED!','#ffd875',28);
+  playChord([440,554,659,880],'triangle',0.35,0.12);
+  // Restore 50% life to ALL knights (queue + beds)
+  queueKnights.forEach(k=>{ k.life=Math.min(k.maxLife, k.life+k.maxLife*0.50); });
+  beds.forEach(b=>{ if(b.patient){ b.patient.life=Math.min(b.patient.maxLife, b.patient.life+b.patient.maxLife*0.50); } });
+  addFloatingText(360,700,'🔔 WAR RALLY! +50% ALL TIMERS!','#ffd875',28);
+  createParticles(360,700,'#ffd875',20);
 }
 function activateFortress() {
   if (skills.fortress.timer>0) return;
   skills.fortress.timer=skills.fortress.cooldown; vibrate(60);
   playChord([523,659,784,1046,1318],'sine',0.6,0.15);
-  wallHP=Math.min(maxWallHP,wallHP+25);
-  addFloatingText(360,400,'🏰 STONE FORTRESS! +25 WALL HP!','#00e676',30);
-  createParticles(360,380,'#00e676',40);
+  wallHP=Math.min(maxWallHP,wallHP+30);
+  // Also grant 5s of partial projectile reduction
+  skills.shield.activeTime=Math.max(skills.shield.activeTime, 5.0);
+  addFloatingText(360,380,'🏰 IRON BASTION! +30 WALL HP!','#00e676',30);
+  createParticles(360,380,'#00e676',50);
   if(gameMode==='online') sendOnlineData({type:'wallHP',v:wallHP});
 }
 
@@ -746,7 +797,7 @@ function triggerWaveReward() {
 function selectRelic(idx) {
   const r=rewardOptions[idx]; if(!r) return;
   playerRelics.push(r);
-  r.apply(perks,{maxWallHP,wallHP});
+  r.apply(perks);
   perks.phoenixUsed=false; // reset phoenix each wave
   wallHP=Math.min(maxWallHP,wallHP+18+perks.wallArmor);
   currentWave++; waveSpawned=0; waveKnightsSaved=0; waveKnightsLost=0; spawnTimer=1.0;
@@ -892,19 +943,49 @@ function update(dt) {
     if(k.life<=0) handleKnightDeath(k,null);
   });
 
+  // Wall passive regen (Celestial Spring relic)
+  if(perks.wallRegen>0){
+    wallHP=Math.min(maxWallHP, wallHP+perks.wallRegen*dt);
+  }
+
   // Bed treatment
+  const occupiedBeds = beds.filter(b=>b.patient).length;
   beds.forEach(bed=>{
     if(!bed.patient) return;
     const p=bed.patient;
     const decayRate = bed.isHealing ? 0.42 : 1.0;
     p.life-=dt*decayRate;
-    if(p.life<=0){ handleKnightDeath(p,bed); return; }
+    if(p.life<=0){
+      // Phoenix relic: restore 35 HP on first death per wave
+      if(perks.phoenix&&!perks.phoenixUsed&&wallHP<=0){
+        perks.phoenixUsed=true; wallHP=35;
+        addFloatingText(360,420,'🔥 PHOENIX DRAUGHT! WALL SAVED!','#ff9800',30);
+        createParticles(360,380,'#ff9800',40);
+        if(gameMode==='online') sendOnlineData({type:'wallHP',v:wallHP});
+        return;
+      }
+      handleKnightDeath(p,bed);
+      return;
+    }
 
-    if(perks.autoHeal>0&&p.isPurified){ bed.treatProgress+=dt*perks.autoHeal*perks.healMult; if(Math.random()<0.25) particles.push({x:bed.x+(Math.random()-.5)*60,y:bed.y+(Math.random()-.5)*40,vx:0,vy:-30,size:3,color:'#00e676',alpha:0.8,decay:1.5}); }
+    // Auto-purify relic (Holy Purifier) — purify on placement
+    if(perks.autoPurify&&!p.isPurified){ p.isPurified=true; }
+
+    // Auto-heal (Apothecary Order relic)
+    if(perks.autoHeal>0&&p.isPurified){
+      bed.treatProgress+=dt*perks.autoHeal*perks.healMult;
+      if(Math.random()<0.25) particles.push({x:bed.x+(Math.random()-.5)*60,y:bed.y+(Math.random()-.5)*40,vx:0,vy:-30,size:3,color:'#00e676',alpha:0.8,decay:1.5});
+    }
 
     if(bed.isHealing&&!assassinActive){
       if(!p.isPurified){ p.isPurified=true; createParticles(bed.x,bed.y,'#b388ff',15); addFloatingText(bed.x,bed.y-40,'✨ PURIFIED!','#b388ff',20); playTone(700,'triangle',0.15,0.1); }
-      else{ bed.treatProgress+=dt*1.85*perks.healMult; if(Math.random()<0.4) particles.push({x:bed.x+(Math.random()-.5)*70,y:bed.y+(Math.random()-.5)*50,vx:(Math.random()-.5)*30,vy:-(20+Math.random()*40),size:4,color:'#ffd54f',alpha:0.9,decay:2.0}); }
+      else{
+        // Swift Hands relic: faster heals if multiple beds occupied
+        const swiftBonus = (perks.swiftHands&&occupiedBeds>=2) ? 1.35 : 1.0;
+        // Double tap relic: 50% extra progress per tap (handled via treatProgress boost on click)
+        bed.treatProgress+=dt*1.85*perks.healMult*swiftBonus;
+        if(Math.random()<0.4) particles.push({x:bed.x+(Math.random()-.5)*70,y:bed.y+(Math.random()-.5)*50,vx:(Math.random()-.5)*30,vy:-(20+Math.random()*40),size:4,color:'#ffd54f',alpha:0.9,decay:2.0});
+      }
     }
     if(bed.treatProgress>=p.type.healTime) treatKnightSuccess(bed);
   });
@@ -954,11 +1035,17 @@ function draw() {
   if(wd.weather==='storm'){ ctx.strokeStyle='rgba(174,213,249,0.35)'; ctx.lineWidth=1.5; for(let r of stormRain){ ctx.beginPath(); ctx.moveTo(r.x,r.y); ctx.lineTo(r.x-6,r.y+r.len); ctx.stroke(); } }
 
   drawCastleWall();
-  drawInfirmaryInterior();
-  beds.forEach(b=>drawBed(b));
-  drawQueueArea();
 
-  if((gameMode==='vs'||gameMode==='online')&&(playerRole==='attacker'||gameMode==='vs')) drawAttackerCommandBar();
+  if(playerRole==='attacker'){
+    drawAttackerSiegeHub();
+  } else {
+    drawInfirmaryInterior();
+    beds.forEach(b=>drawBed(b));
+    drawQueueArea();
+    if(gameMode==='vs'){
+      drawAttackerCommandBar();
+    }
+  }
 
   drawCatapultsAndProjectiles();
 
@@ -1019,6 +1106,22 @@ function drawCastleWall() {
   drawBanner(70,210,'#c62828','#ffd54f');
   drawBanner(645,210,'#1565c0','#ffd54f');
   wallDefenders.forEach(d=>drawWallDefender(d.x,d.y,d.type,d.arch));
+
+  // Divine Aegis Golden Barrier Aura
+  if(skills.shield.activeTime>0){
+    ctx.save();
+    const pulse = Math.sin(globalTime*12)*0.15 + 0.85;
+    ctx.strokeStyle = `rgba(255, 215, 0, ${0.85*pulse})`;
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(360, 290, 340, Math.PI, 0);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 215, 0, 0.12)';
+    ctx.fill();
+    ctx.fillStyle = '#ffd875'; ctx.font = '900 15px Georgia,serif'; ctx.textAlign = 'center';
+    ctx.fillText('🛡️ DIVINE SHIELD BARRIER ACTIVE', 360, 205);
+    ctx.restore();
+  }
 }
 
 function drawBanner(x,y,bg,trim){
@@ -1036,6 +1139,101 @@ function drawWallDefender(x,y,type,arch){
   ctx.fillStyle=type.color; ctx.fillRect(-9,-12,18,16);
   if(arch===ARCHETYPES.ARCHER){ ctx.strokeStyle='#8d6e63'; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(14,-12,16,-Math.PI/2,Math.PI/2); ctx.stroke(); }
   else{ ctx.strokeStyle='#b0bec5'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(12,6); ctx.lineTo(12,-34); ctx.stroke(); ctx.fillStyle='#ffd54f'; ctx.beginPath(); ctx.moveTo(12,-42); ctx.lineTo(16,-34); ctx.lineTo(8,-34); ctx.closePath(); ctx.fill(); }
+  ctx.restore();
+}
+
+function drawAttackerSiegeHub(){
+  ctx.save();
+  // Deep war-forge backdrop
+  const ag=ctx.createLinearGradient(0,410,0,H);
+  ag.addColorStop(0,'#220b0e'); ag.addColorStop(0.35,'#140709'); ag.addColorStop(1,'#070203');
+  ctx.fillStyle=ag; ctx.fillRect(0,410,W,H-410);
+
+  // Border separator
+  ctx.strokeStyle='#ff5252'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(0,410); ctx.lineTo(W,410); ctx.stroke();
+
+  // Header Title
+  ctx.fillStyle='#ff8a80'; ctx.font='900 22px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  ctx.fillText('👑 WARLORD SIEGE ARSENAL',360,445);
+  ctx.fillStyle='#cfd8dc'; ctx.font='13px Georgia,serif';
+  ctx.fillText('Tap siege weapons to bombard and breach the enemy castle keep!',360,470);
+
+  // 6 Large Ergonomic Attack Cards
+  const siegeCards = [
+    { key:'catapult',   x:30,  y:495, w:315, h:125, desc:'🪨 Catapult boulder • 14–18 wall damage' },
+    { key:'arrowVolley',x:375, y:495, w:315, h:125, desc:'🏹 Four incoming boulders' },
+    { key:'ladderRush', x:30,  y:635, w:315, h:125, desc:'🪜 Ladder assault • 16 wall damage' },
+    { key:'plagueBomb', x:375, y:635, w:315, h:125, desc:'☣️ Curse Reinforcements' },
+    { key:'siegeTower', x:30,  y:775, w:315, h:125, desc:'🗼 Siege ram • 28 damage + boulders' },
+    { key:'assassin',   x:375, y:775, w:315, h:125, desc:'🥷 Blocks healing for 8 seconds' },
+  ];
+
+  siegeCards.forEach(card=>{
+    const sk=attackerSkills[card.key];
+    const ready=sk.timer<=0;
+
+    // Button Background
+    ctx.fillStyle=ready?'#3d1419':'#1c0b0e';
+    roundRect(ctx,card.x,card.y,card.w,card.h,12);
+    ctx.fill();
+    ctx.strokeStyle=ready?'#ff5252':'#5c2226';
+    ctx.lineWidth=ready?2.5:1;
+    ctx.stroke();
+
+    // Large Icon
+    ctx.font='34px sans-serif'; ctx.textAlign='left'; ctx.textBaseline='middle';
+    ctx.fillText(sk.icon, card.x+16, card.y+36);
+
+    // Title
+    ctx.fillStyle=ready?'#ffffff':'#9e9e9e';
+    ctx.font='900 17px Georgia,serif';
+    ctx.fillText(sk.name, card.x+64, card.y+32);
+
+    // Subtitle / Dmg description
+    ctx.fillStyle=ready?'#ff8a80':'#757575';
+    ctx.font='12px Georgia,serif';
+    ctx.fillText(card.desc, card.x+16, card.y+76);
+
+    // Status Pill / Cooldown
+    if(!ready){
+      const fill=(sk.cooldown-sk.timer)/sk.cooldown;
+      ctx.fillStyle='rgba(255,82,82,0.22)';
+      roundRect(ctx,card.x+10,card.y+card.h-18,(card.w-20)*fill,10,5);
+      ctx.fill();
+
+      ctx.fillStyle='#ffd54f'; ctx.font='bold 14px Georgia,serif'; ctx.textAlign='right';
+      ctx.fillText(`⏳ ${Math.ceil(sk.timer)}s`, card.x+card.w-16, card.y+32);
+    } else {
+      ctx.fillStyle='#00e676'; ctx.font='900 13px Georgia,serif'; ctx.textAlign='right';
+      ctx.fillText('⚡ READY', card.x+card.w-16, card.y+32);
+    }
+  });
+
+  // Bottom War Intelligence & Stats Card
+  ctx.fillStyle='rgba(11,17,26,0.96)';
+  roundRect(ctx,30,920,660,320,14);
+  ctx.fill();
+  ctx.strokeStyle='#ffd875'; ctx.lineWidth=1.5; ctx.stroke();
+
+  ctx.fillStyle='#ffd875'; ctx.font='900 20px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  ctx.fillText('🎯 SIEGE WAR INTELLIGENCE',55,960);
+
+  ctx.fillStyle='#cfd8dc'; ctx.font='15px Georgia,serif';
+  ctx.fillText(`🏰 Enemy Keep Wall Integrity:  ${Math.ceil(wallHP)} / ${maxWallHP} HP`,55,1005);
+  ctx.fillText(`⏳ Duel Time Remaining:  ${Math.ceil(vsTimeLeft)}s`,55,1040);
+  ctx.fillText(`💥 Goal: Destroy Keep Wall (0 HP) before time runs out!`,55,1075);
+
+  if(assassinActive){
+    ctx.fillStyle='#ff1744'; ctx.font='bold 15px Georgia,serif';
+    ctx.fillText(`🗡️ Night Assassin Active! Infirmary Blocked: ${Math.ceil(assassinTimer)}s`,55,1120);
+  } else if(skills.shield.activeTime>0){
+    ctx.fillStyle='#ffd875'; ctx.font='bold 15px Georgia,serif';
+    ctx.fillText(`🛡️ Defender Shield Active! Barricade Up: ${Math.ceil(skills.shield.activeTime)}s`,55,1120);
+  } else {
+    ctx.fillStyle='#69f0ae'; ctx.font='bold 14px Georgia,serif';
+    ctx.fillText(`⚔️ Keep wall is vulnerable — unleash catapults & siege towers!`,55,1120);
+  }
   ctx.restore();
 }
 
@@ -1240,7 +1438,7 @@ function drawHUD(){
   ctx.fillStyle='#ffd875'; ctx.font='bold 18px Georgia,serif'; ctx.textAlign='right'; ctx.fillText(`✦ ${score}`,684,wby+38);
 
   // 4 Defender Emergency Skill Dock (Cleanly centered above the beds at y = 490)
-  const isDefender = (gameMode !== 'online') || (playerRole === 'defender');
+  const isDefender = playerRole === 'defender';
   if (isDefender) {
     ctx.save();
     ctx.fillStyle = 'rgba(10, 16, 26, 0.94)';
@@ -1315,7 +1513,7 @@ function drawHomeScreen(){
   ctx.fillStyle='rgba(212,175,55,0.18)'; roundRect(ctx,230,170,260,28,14); ctx.fill();
   ctx.strokeStyle='#d4af37'; ctx.lineWidth=1; ctx.stroke();
   ctx.fillStyle='#ffd875'; ctx.font='bold 12px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillText('v3.5 • 20 WAVES & ENDLESS',360,184);
+  ctx.fillText('v4.0 • DEFENSE-FIRST UPDATE',360,184);
 
   ctx.fillStyle='#ffd875'; ctx.font='900 46px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
   ctx.fillText('SIEGE ROUNDS',360,245);
@@ -1330,7 +1528,7 @@ function drawHomeScreen(){
   ctx.fillStyle='#d4af37'; roundRect(ctx,100,415,520,74,14); ctx.fill();
   ctx.strokeStyle='#fff8e1'; ctx.lineWidth=2; ctx.stroke();
   ctx.fillStyle='#06090e'; ctx.font='900 22px Georgia,serif'; ctx.textBaseline='middle'; ctx.fillText('🛡️ PLAY SOLO DEFENSE',360,443);
-  ctx.font='12px Georgia,serif'; ctx.fillText('20 Hardcore Waves • 60% Quota • Endless Mode Unlock',360,467);
+  ctx.font='12px Georgia,serif'; ctx.fillText('20 Hardcore Waves • 70% Rescue Quota • Endless Mode Unlock',360,467);
 
   // 1v1 LOCAL
   ctx.fillStyle='#1e2c3e'; roundRect(ctx,100,505,520,70,14); ctx.fill();
@@ -1342,7 +1540,7 @@ function drawHomeScreen(){
   ctx.fillStyle='#1a2e1a'; roundRect(ctx,100,590,520,70,14); ctx.fill();
   ctx.strokeStyle='#00e676'; ctx.lineWidth=2; ctx.stroke();
   ctx.fillStyle='#69f0ae'; ctx.font='900 20px Georgia,serif'; ctx.fillText('🌐 ONLINE — DIFFERENT PHONES',360,617);
-  ctx.font='12px Georgia,serif'; ctx.fillStyle='#a5d6a7'; ctx.fillText('Real-time WebRTC P2P • No server needed',360,639);
+  ctx.font='12px Georgia,serif'; ctx.fillStyle='#a5d6a7'; ctx.fillText('Cross-phone play via a public MQTT relay • No account needed',360,639);
 
   // HOW TO PLAY
   ctx.fillStyle='#263546'; roundRect(ctx,100,675,520,56,12); ctx.fill();
@@ -1380,7 +1578,7 @@ function drawRoleSelectScreen(){
   ctx.fillStyle='#ff5252'; ctx.font='900 24px Georgia,serif'; ctx.fillText('🗡️ WARLORD (ATTACKER)',360,370);
   ctx.fillStyle='#ffcdd2'; ctx.font='14px Georgia,serif';
   ctx.fillText('Launches catapults, fire arrows, siege towers & assassin.',360,410);
-  ctx.fillText('Controls the TOP command bar — destroy the keep!',360,435);
+  ctx.fillText('Uses the full siege arsenal below the wall — break the keep!',360,435);
   ctx.fillStyle='#ff8a80'; ctx.font='bold 14px Georgia,serif'; ctx.fillText('TAP HERE TO PLAY AS ATTACKER →',360,490);
 
   // Defender
@@ -1389,7 +1587,7 @@ function drawRoleSelectScreen(){
   ctx.fillStyle='#00e676'; ctx.font='900 24px Georgia,serif'; ctx.fillText('🛡️ MEDIC (DEFENDER)',360,620);
   ctx.fillStyle='#c8e6c9'; ctx.font='14px Georgia,serif';
   ctx.fillText('Runs the infirmary — triage knights & cast emergency powers.',360,660);
-  ctx.fillText('Controls the BOTTOM area — survive the siege!',360,685);
+  ctx.fillText('Uses the infirmary and emergency powers — hold the keep!',360,685);
   ctx.fillStyle='#69f0ae'; ctx.font='bold 14px Georgia,serif'; ctx.fillText('TAP HERE TO PLAY AS DEFENDER →',360,740);
 
   ctx.fillStyle='#546e7a'; roundRect(ctx,200,830,320,52,10); ctx.fill();
@@ -1406,7 +1604,7 @@ function drawOnlineScreen(){
   ctx.fillStyle='#69f0ae'; ctx.font='900 32px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
   ctx.fillText('🌐 ONLINE 1v1 DUEL',360,165);
   ctx.fillStyle='#a0b3c6'; ctx.font='14px Georgia,serif';
-  ctx.fillText('Real-Time Cross-Phone Battle • No Server Setup Needed',360,195);
+  ctx.fillText('Cross-phone battle through a public MQTT relay',360,195);
 
   // ═══════════════════════════════════════════════════════════
   // 1. HOST SECTION (Defender / Medic)
@@ -1571,9 +1769,9 @@ function drawHowToPlayScreen(){
       badge: '🚨 1. TRIAGE WARDS & BLEEDOUT TIMERS',
       badgeCol: '#ff5252',
       lines: [
-        '💀 CRITICAL (RED): Bleeds in ~6s! Deals 38 wall damage if lost.',
-        '⚡ URGENT (YELLOW): Bleeds in ~9s! Deals 26 wall damage if lost.',
-        '🛡️ MINOR (GREEN): Bleeds in ~13s! Deals 18 wall damage if lost.'
+        '💀 CRITICAL (RED): Bleeds in 5.2s! Deals 40 wall damage if lost.',
+        '⚡ URGENT (YELLOW): Bleeds in 7.8s! Deals 28 wall damage if lost.',
+        '🛡️ MINOR (GREEN): Bleeds in 11s! Deals 20 wall damage if lost.'
       ]
     },
     {
@@ -1599,17 +1797,17 @@ function drawHowToPlayScreen(){
       badge: '🧪 4. DEFENDER EMERGENCY POWERS',
       badgeCol: '#40c4ff',
       lines: [
-        '🧪 Elixir (18s CD): Instantly advances healing on ALL beds.',
-        '🛡️ Barricade (32s CD): 9 seconds of complete wall immunity.',
-        '🔔 Rally (28s CD): Extends bleedout timers for all patients.',
-        '🏰 Fortress (45s CD): Instantly repairs +25 Wall HP.'
+        '🧪 Miracle Elixir (14s CD): Advances all treatment and repairs +20 wall HP.',
+        '🛡️ Divine Aegis (28s CD): Blocks wall damage for 12 seconds.',
+        '🔔 War Rally (22s CD): Restores half the time on every patient.',
+        '🏰 Iron Bastion (38s CD): Repairs +30 wall HP and grants 5s shield.'
       ]
     },
     {
       badge: '⚔️ 5. CAMPAIGN, ENDLESS & 1v1 MODES',
       badgeCol: '#e040fb',
       lines: [
-        '• Solo: 20 escalating waves. Must save at least 60% of knights to pass.',
+        '• Solo: 20 escalating waves. Rescue at least 70% of each wave to pass.',
         '• Endless: Beat wave 20 to unlock infinite procedural survival!',
         '• 1v1 Online/Local: One attacks with siege engines, one defends!'
       ]
@@ -1863,17 +2061,35 @@ canvas.addEventListener('pointerdown', e=>{
   if(pt.x>585&&pt.x<631&&pt.y>20&&pt.y<60){ soundOn=!soundOn; localStorage.setItem('sr_sound',soundOn?'1':'0'); return; }
   if(pt.x>642&&pt.x<688&&pt.y>20&&pt.y<60){ gameState='pause'; playTone(400,'sine',0.1,0.1); return; }
 
-  // ATTACKER command bar (1v1 vs / online when local player is attacker)
-  const showAttacker=(gameMode==='vs')||( gameMode==='online'&&playerRole==='attacker');
-  if(showAttacker&&pt.y>=142&&pt.y<=200){
+  // ATTACKER CONTROLS (Dedicated bottom Siege Arsenal)
+  if(playerRole==='attacker'){
+    const siegeCards = [
+      { key:'catapult',   x:30,  y:495, w:315, h:125 },
+      { key:'arrowVolley',x:375, y:495, w:315, h:125 },
+      { key:'ladderRush', x:30,  y:635, w:315, h:125 },
+      { key:'plagueBomb', x:375, y:635, w:315, h:125 },
+      { key:'siegeTower', x:30,  y:775, w:315, h:125 },
+      { key:'assassin',   x:375, y:775, w:315, h:125 },
+    ];
+    for(let card of siegeCards){
+      if(pt.x>=card.x && pt.x<=card.x+card.w && pt.y>=card.y && pt.y<=card.y+card.h){
+        triggerAttackerSkill(card.key);
+        return;
+      }
+    }
+    return;
+  }
+
+  // LOCAL 1v1 (Same Phone: Top command bar for Player 1)
+  if(gameMode==='vs' && pt.y>=110 && pt.y<=214){
     const keys=['catapult','arrowVolley','ladderRush','plagueBomb','siegeTower','assassin'];
     keys.forEach((k,idx)=>{ const bx=26+idx*112; if(pt.x>=bx&&pt.x<=bx+105) triggerAttackerSkill(k); });
     return;
   }
 
-  // Defender skills (only if not attacker in online)
-  const isDefender=(gameMode!=='online')||(playerRole==='defender');
-  if(isDefender){
+  // DEFENDER CONTROLS (Solo, Endless, Online Host, 1v1 Defender)
+  if(playerRole==='defender'){
+    // Defender Emergency Powers Dock at y = 490
     if(pt.y >= 490 && pt.y <= 565){
       if(pt.x >= 30 && pt.x <= 190){ activateElixir(); return; }
       if(pt.x >= 192 && pt.x <= 354){ activateShield(); return; }
@@ -1881,7 +2097,7 @@ canvas.addEventListener('pointerdown', e=>{
       if(pt.x >= 518 && pt.x <= 678){ activateFortress(); return; }
     }
 
-    // Tap bed
+    // Tap triage bed
     for(let bed of beds){
       if(Math.abs(pt.x-bed.x)<95&&Math.abs(pt.y-bed.y)<125){
         if(!bed.patient&&selectedQueueKnight){
@@ -1896,9 +2112,8 @@ canvas.addEventListener('pointerdown', e=>{
           return;
         }
         if(bed.patient&&!assassinActive){
-          bed.isHealing=true; bed.treatProgress+=0.32*perks.healMult; vibrate(15);
+          bed.isHealing=true; bed.treatProgress+=(perks.doubleTap?0.48:0.32)*perks.healMult; vibrate(15);
           playTone(480+bed.idx*120,'triangle',0.1,0.08);
-          // Purse tap on cursed knight gives immediate purification progress
           if(bed.patient&&!bed.patient.isPurified){ bed.patient.isPurified=true; createParticles(bed.x,bed.y,'#b388ff',15); addFloatingText(bed.x,bed.y-40,'✨ PURIFIED!','#b388ff',20); }
           if(tutorialStep===2) tutorialStep=0;
           return;

@@ -1,4 +1,4 @@
-const CACHE = 'siege-rounds-v11';
+const CACHE = 'siege-rounds-v12';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', event => {

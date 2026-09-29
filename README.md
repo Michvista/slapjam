@@ -66,7 +66,7 @@ When uploading your game to itch.io:
 - **Jam**: Slapjam AI 1 ([itch.io/jam/slapjam-ai-1](https://itch.io/jam/slapjam-ai-1))
 - **Theme**: Castles
 - **Human Creator**: (Your Itch handle)
-- **AI Tools Used**: Google Antigravity & Gemini 3.8
+- **AI Tools Used**: Google Antigravity, Gemini (as used by the creator), and OpenAI Codex.
 - **Technical Specs**:
   - Pure HTML5 + Canvas 2D + WebAudio synthesis.
   - Zero external npm packages, zero runtime dependencies.
