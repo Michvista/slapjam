@@ -267,6 +267,8 @@ let handshakeTimer = null;
 let mqttAttemptId = 0;
 let mqttRelayFailures = [];
 let relayAttemptTimer = null;
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const MQTT_BROKERS = [
   // Port 443 works on phone networks that block less common WebSocket ports.
   { host:'demo.tbmq.io', port:443, path:'/mqtt', username:'demo' },
@@ -293,6 +295,7 @@ function disconnectMQTT() {
 }
 
 function initHostRoom() {
+  if (IS_IOS) { onlineStatus = 'Online multiplayer is currently unavailable on iOS. Use Android/desktop, or play Local Duel offline.'; return; }
   disconnectMQTT();
   brokerAttempt = 0;
   mqttRelayFailures = [];
@@ -305,6 +308,7 @@ function initHostRoom() {
 }
 
 function joinHostRoom(code) {
+  if (IS_IOS) { onlineStatus = 'Online multiplayer is currently unavailable on iOS. Use Android/desktop, or play Local Duel offline.'; return; }
   const clean = (code || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
   if (clean.length < 3) {
     onlineStatus = 'Please enter a valid 4-character room code!';
@@ -1708,6 +1712,24 @@ function drawOnlineScreen(){
   ctx.fillStyle='#a0b3c6'; ctx.font='14px Georgia,serif';
   ctx.fillText('Cross-phone battle through a public MQTT relay',360,195);
 
+  if(IS_IOS){
+    ctx.fillStyle='#351619'; roundRect(ctx,65,270,590,330,18); ctx.fill();
+    ctx.strokeStyle='#ff5252'; ctx.lineWidth=3; ctx.stroke();
+    ctx.fillStyle='#ff8a80'; ctx.font='900 24px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('ONLINE MULTIPLAYER UNAVAILABLE ON iOS',360,330);
+    ctx.fillStyle='#f4d8d8'; ctx.font='16px Georgia,serif';
+    ctx.fillText('iPhone browser relay connections are not working reliably.',360,385);
+    ctx.fillText('Play Local Duel offline on this phone,',360,430);
+    ctx.fillText('or join an online duel from Android or desktop.',360,458);
+    ctx.fillStyle='#ffd875'; ctx.font='bold 15px Georgia,serif';
+    ctx.fillText('No connection attempt will be started on this device.',360,525);
+
+    ctx.fillStyle='#546e7a'; roundRect(ctx,200,830,320,50,10); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.font='bold 16px Georgia,serif'; ctx.textBaseline='middle';
+    ctx.fillText('← BACK TO HOME',360,855);
+    return;
+  }
+
   // ═══════════════════════════════════════════════════════════
   // 1. HOST SECTION (Defender / Medic)
   // ═══════════════════════════════════════════════════════════
@@ -2038,6 +2060,10 @@ canvas.addEventListener('pointerdown', e=>{
 
   // ONLINE SCREEN
   if(gameState==='online'){
+    if(IS_IOS){
+      if(pt.x>200&&pt.x<520&&pt.y>830&&pt.y<885){ gameState='home'; return; }
+      return;
+    }
     // Dismiss keyboard if tapped outside the keyboard tray (above y=710, excluding the input & paste buttons)
     if(roomCodeInputActive && pt.y < 710){
       const inInputBox = (pt.x >= 110 && pt.x <= 460 && pt.y >= 545 && pt.y <= 600);
