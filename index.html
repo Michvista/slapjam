@@ -265,6 +265,8 @@ let currentClientId = '';
 let brokerAttempt = 0;
 let handshakeTimer = null;
 const MQTT_BROKERS = [
+  // Port 443 works on phone networks that block less common WebSocket ports.
+  { host:'demo.tbmq.io', port:443, path:'/mqtt', username:'demo' },
   { host:'broker.emqx.io', port:8084, path:'/mqtt' },
   { host:'broker.hivemq.com', port:8884, path:'/mqtt' }
 ];
@@ -353,6 +355,7 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
 
     mqttClient.connect({
       useSSL: true,
+      ...(broker.username ? { userName:broker.username } : {}),
       timeout: 15,
       keepAliveInterval: 30,
       cleanSession: true,
@@ -388,7 +391,7 @@ function connectMQTTRoom(code, isHost, brokerIdx = 0) {
           onlineStatus = 'Broker ' + (brokerIdx + 1) + ' unavailable. Trying backup...';
           setTimeout(() => connectMQTTRoom(code, isHost, brokerIdx + 1), 250);
         } else {
-          onlineStatus = 'Connection failed (' + (err.errorMessage || 'network unavailable') + '). Check both devices\' internet and retry.';
+          onlineStatus = 'Connection failed (' + (err.errorMessage || 'network unavailable') + '). Phone networks may block game relays; retry on Wi-Fi or use Local 1v1.';
           onlineState = 'error';
         }
       }
@@ -1036,7 +1039,9 @@ function draw() {
 
   drawCastleWall();
 
-  if(playerRole==='attacker'){
+  if(gameMode==='vs' && playerRole==='both'){
+    drawLocalDuelSplit();
+  } else if(playerRole==='attacker'){
     drawAttackerSiegeHub();
   } else {
     drawInfirmaryInterior();
@@ -1071,7 +1076,7 @@ function draw() {
     ctx.fillText(`🗡️ ASSASSIN! HEALING BLOCKED — ${Math.ceil(assassinTimer)}s`,360,700);
   }
 
-  drawHUD();
+  if(!(gameMode==='vs'&&playerRole==='both')) drawHUD();
   if(tutorialStep>0&&gameState==='play') drawTutorialHint();
 
   // State overlays
@@ -1246,6 +1251,64 @@ function drawInfirmaryInterior(){
   ctx.strokeStyle='#263445'; ctx.lineWidth=14;
   for(let i=0;i<3;i++){ const x=[130,360,590][i]; ctx.beginPath(); ctx.arc(x,630,100,Math.PI,0); ctx.stroke(); }
   drawTorch(40,425); drawTorch(245,425); drawTorch(475,425); drawTorch(680,425);
+}
+
+function drawLocalDuelSplit(){
+  // Upper half belongs to the attacker; lower half belongs to the defender.
+  const forge=ctx.createLinearGradient(0,0,0,640);
+  forge.addColorStop(0,'#18080b'); forge.addColorStop(1,'#3a1518');
+  ctx.fillStyle=forge; ctx.fillRect(0,0,W,640);
+  drawCastleWall();
+  ctx.fillStyle='rgba(15,5,7,0.96)'; roundRect(ctx,18,16,684,75,12); ctx.fill();
+  ctx.strokeStyle='#ff5252'; ctx.lineWidth=2; ctx.stroke();
+  ctx.fillStyle='#ff8a80'; ctx.font='900 21px Georgia,serif'; ctx.textAlign='left'; ctx.textBaseline='middle';
+  ctx.fillText('👑 ATTACKER — BREAK THE KEEP',34,39);
+  ctx.fillStyle='#ffd875'; ctx.font='bold 13px Georgia,serif'; ctx.textAlign='right';
+  ctx.fillText(`${Math.ceil(vsTimeLeft)}s  •  WALL ${Math.ceil(wallHP)} HP`,565,40);
+  ctx.fillStyle=soundOn?'#2e7d32':'#c62828'; roundRect(ctx,585,23,42,34,8); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font='15px sans-serif'; ctx.textAlign='center'; ctx.fillText(soundOn?'🔊':'🔇',606,40);
+  ctx.fillStyle='#37474f'; roundRect(ctx,642,23,42,34,8); ctx.fill();
+  ctx.fillStyle='#ffd875'; ctx.fillText('⏸',663,40);
+  const ratio=Math.max(0,wallHP/maxWallHP);
+  ctx.fillStyle='#310e12'; roundRect(ctx,34,62,648,14,7); ctx.fill();
+  ctx.fillStyle=ratio>0.4?'#ff5252':'#ff1744'; roundRect(ctx,34,62,648*ratio,14,7); ctx.fill();
+  ctx.fillStyle='#ff8a80'; ctx.font='bold 12px Georgia,serif'; ctx.textAlign='center';
+  ctx.fillText('TAP A SIEGE WEAPON',360,118);
+  const cards=[
+    ['catapult',30,140],['arrowVolley',375,140],
+    ['ladderRush',30,280],['plagueBomb',375,280],
+    ['siegeTower',30,420],['assassin',375,420]
+  ];
+  for(const [key,x,y] of cards){
+    const sk=attackerSkills[key], ready=sk.timer<=0;
+    ctx.fillStyle=ready?'#40151a':'#210d10'; roundRect(ctx,x,y,315,122,12); ctx.fill();
+    ctx.strokeStyle=ready?'#ff5252':'#633037'; ctx.lineWidth=2; ctx.stroke();
+    ctx.textAlign='left'; ctx.textBaseline='middle'; ctx.font='29px sans-serif'; ctx.fillText(sk.icon,x+17,y+38);
+    ctx.fillStyle=ready?'#fff':'#9e9e9e'; ctx.font='900 16px Georgia,serif'; ctx.fillText(sk.name,x+60,y+34);
+    ctx.fillStyle=ready?'#69f0ae':'#ffd875'; ctx.font='bold 13px Georgia,serif'; ctx.fillText(ready?'READY — TAP':`READY IN ${Math.ceil(sk.timer)}s`,x+60,y+76);
+  }
+
+  ctx.fillStyle='#d4af37'; ctx.fillRect(0,638,W,4);
+  const ward=ctx.createLinearGradient(0,642,0,H);
+  ward.addColorStop(0,'#202e3a'); ward.addColorStop(1,'#090e15');
+  ctx.fillStyle=ward; ctx.fillRect(0,642,W,H-642);
+  ctx.fillStyle='#101a26'; roundRect(ctx,18,647,684,42,9); ctx.fill();
+  ctx.strokeStyle='#78909c'; ctx.lineWidth=1; ctx.stroke();
+  ctx.fillStyle='#ffd875'; ctx.font='bold 13px Georgia,serif'; ctx.textAlign='left';
+  ctx.fillText('🛡️ DEFENDER — TRIAGE & HEAL',32,668);
+  ctx.fillStyle='#cfd8dc'; ctx.textAlign='right';
+  ctx.fillText(`SCORE ✦ ${score}`,688,668);
+  drawDockSkillButton(34,697,154,38,skills.elixir);
+  drawDockSkillButton(196,697,154,38,skills.shield);
+  drawDockSkillButton(358,697,154,38,skills.rally);
+  drawDockSkillButton(520,697,154,38,skills.fortress);
+  ctx.save(); ctx.beginPath(); ctx.rect(0,738,W,H-738); ctx.clip();
+  drawInfirmaryInterior();
+  ctx.save(); ctx.translate(0,105);
+  beds.forEach(b=>drawBed(b));
+  ctx.restore();
+  drawQueueArea();
+  ctx.restore();
 }
 
 function drawTorch(x,y){
@@ -1533,8 +1596,8 @@ function drawHomeScreen(){
   // 1v1 LOCAL
   ctx.fillStyle='#1e2c3e'; roundRect(ctx,100,505,520,70,14); ctx.fill();
   ctx.strokeStyle='#ff5252'; ctx.lineWidth=2; ctx.stroke();
-  ctx.fillStyle='#ffd875'; ctx.font='900 20px Georgia,serif'; ctx.fillText('⚔️ 1v1 LOCAL (SAME PHONE)',360,532);
-  ctx.font='12px Georgia,serif'; ctx.fillStyle='#ff8a80'; ctx.fillText('Offline • P1 Warlord (Top) vs P2 Medic (Bottom)',360,554);
+  ctx.fillStyle='#ffd875'; ctx.font='900 20px Georgia,serif'; ctx.fillText('⚔️ LOCAL DUEL (SAME PHONE)',360,532);
+  ctx.font='12px Georgia,serif'; ctx.fillStyle='#ff8a80'; ctx.fillText('Offline • Attacker controls top, Defender controls bottom',360,554);
 
   // ONLINE vs different phones
   ctx.fillStyle='#1a2e1a'; roundRect(ctx,100,590,520,70,14); ctx.fill();
@@ -1908,7 +1971,7 @@ canvas.addEventListener('pointerdown', e=>{
   // HOME SCREEN
   if(gameState==='home'){
     if(pt.x>100&&pt.x<620&&pt.y>415&&pt.y<489){ startGame('solo'); return; }
-    if(pt.x>100&&pt.x<620&&pt.y>505&&pt.y<575){ playerRole='defender'; gameState='roleselect'; playTone(440,'triangle',0.1,0.08); return; }
+    if(pt.x>100&&pt.x<620&&pt.y>505&&pt.y<575){ playerRole='both'; startGame('vs'); return; }
     if(pt.x>100&&pt.x<620&&pt.y>590&&pt.y<660){ gameState='online'; onlineState='idle'; onlineStatus=''; roomCodeInput=''; roomCodeInputActive=false; playTone(440,'triangle',0.1,0.08); return; }
     if(pt.x>100&&pt.x<620&&pt.y>675&&pt.y<731){ gameState='howtoplay'; playTone(440,'triangle',0.1,0.08); return; }
     if(pt.x>160&&pt.x<340&&pt.y>795&&pt.y<839){ soundOn=!soundOn; localStorage.setItem('sr_sound',soundOn?'1':'0'); playTone(520,'sine',0.1,0.1); return; }
@@ -2062,6 +2125,18 @@ canvas.addEventListener('pointerdown', e=>{
   if(pt.x>642&&pt.x<688&&pt.y>20&&pt.y<60){ gameState='pause'; playTone(400,'sine',0.1,0.1); return; }
 
   // ATTACKER CONTROLS (Dedicated bottom Siege Arsenal)
+  if(gameMode==='vs' && playerRole==='both'){
+    if(pt.y>=135 && pt.y<=555){
+      const cards=[['catapult',30,140],['arrowVolley',375,140],['ladderRush',30,280],['plagueBomb',375,280],['siegeTower',30,420],['assassin',375,420]];
+      for(const [key,x,y] of cards){ if(pt.x>=x&&pt.x<=x+315&&pt.y>=y&&pt.y<=y+122){ triggerAttackerSkill(key); return; } }
+      return;
+    }
+    if(pt.y>=697&&pt.y<=735){
+      if(pt.x<190) activateElixir(); else if(pt.x<352) activateShield(); else if(pt.x<514) activateRally(); else activateFortress();
+      return;
+    }
+  }
+
   if(playerRole==='attacker'){
     const siegeCards = [
       { key:'catapult',   x:30,  y:495, w:315, h:125 },
@@ -2088,9 +2163,9 @@ canvas.addEventListener('pointerdown', e=>{
   }
 
   // DEFENDER CONTROLS (Solo, Endless, Online Host, 1v1 Defender)
-  if(playerRole==='defender'){
+  if(playerRole==='defender'||(gameMode==='vs'&&playerRole==='both')){
     // Defender Emergency Powers Dock at y = 490
-    if(pt.y >= 490 && pt.y <= 565){
+    if(!(gameMode==='vs'&&playerRole==='both') && pt.y >= 490 && pt.y <= 565){
       if(pt.x >= 30 && pt.x <= 190){ activateElixir(); return; }
       if(pt.x >= 192 && pt.x <= 354){ activateShield(); return; }
       if(pt.x >= 356 && pt.x <= 516){ activateRally(); return; }
@@ -2099,7 +2174,8 @@ canvas.addEventListener('pointerdown', e=>{
 
     // Tap triage bed
     for(let bed of beds){
-      if(Math.abs(pt.x-bed.x)<95&&Math.abs(pt.y-bed.y)<125){
+      const bedY=bed.y+((gameMode==='vs'&&playerRole==='both')?105:0);
+      if(Math.abs(pt.x-bed.x)<95&&Math.abs(pt.y-bedY)<125){
         if(!bed.patient&&selectedQueueKnight){
           if(bed.type===selectedQueueKnight.type){
             bed.patient=selectedQueueKnight; bed.treatProgress=0; bed.isHealing=false;
@@ -2150,7 +2226,7 @@ canvas.addEventListener('pointerup',e=>{
     if(t.dragKnight){
       const knight=t.dragKnight; knight.dragged=false;
       let dropped=null;
-      for(let bed of beds){ if(Math.abs(pt.x-bed.x)<100&&Math.abs(pt.y-bed.y)<130){ dropped=bed; break; } }
+      for(let bed of beds){ const bedY=bed.y+((gameMode==='vs'&&playerRole==='both')?105:0); if(Math.abs(pt.x-bed.x)<100&&Math.abs(pt.y-bedY)<130){ dropped=bed; break; } }
       if(dropped){
         if(!dropped.patient&&dropped.type===knight.type){
           dropped.patient=knight; dropped.treatProgress=0; dropped.isHealing=false;

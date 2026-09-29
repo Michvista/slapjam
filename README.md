@@ -57,7 +57,8 @@ When uploading your game to itch.io:
 - **Administer Treatment**: Once a knight is in a bed, **tap the bed rapidly** to treat them.
 - **Reinforce the Battlements**: When fully healed, knights celebrate and rush to the castle ramparts, restoring wall integrity and standing guard against catapults.
 - **Relic Forge**: Between waves, forge one of 6 Keep Relics (Royal Field Salve, Granite Bastion, Herbal Tincture, Apothecary Order, Rallying Horn, War Treasury).
-- **Two-Player Co-Op Mode**: Share a single phone screen with simultaneous multitouch support! Player 1 defends the left sector (Critical & Urgent), Player 2 defends the right sector (Urgent & Minor).
+- **Offline Local Duel**: Both players share one phone in portrait. The attacker taps siege weapons in the top half; the defender drags knights to beds and taps to heal in the bottom half. The split controls support simultaneous touch.
+- **Online Duel**: Create or join a room to play attacker versus defender over the internet. Phone-friendly secure WebSocket relay is tried first; both players need an internet connection for online play.
 
 ---
 
